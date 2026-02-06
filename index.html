@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0f1117">
+<title>14-Day Program</title>
+<link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIjE0LURheSBXb3Jrb3V0IiwKICAic2hvcnRfbmFtZSI6ICJXb3Jrb3V0IiwKICAic3RhcnRfdXJsIjogIi4iLAogICJkaXNwbGF5IjogInN0YW5kYWxvbmUiLAogICJiYWNrZ3JvdW5kX2NvbG9yIjogIiMwZjExMTciLAogICJ0aGVtZV9jb2xvciI6ICIjMGYxMTE3Igp9">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+:root {
+  --bg: #0f1117;
+  --card: #181b22;
+  --card-hover: #1e2128;
+  --border: rgba(255,255,255,0.06);
+  --text: #e8e6e1;
+  --text-muted: #8b8a87;
+  --accent: #f0a050;
+  --accent-dim: rgba(240,160,80,0.15);
+  --green: #4ade80;
+  --green-dim: rgba(74,222,128,0.15);
+  --red: #ef4444;
+  --blue: #60a5fa;
+  --blue-dim: rgba(96,165,250,0.15);
+}
+
+html, body {
+  font-family: 'DM Sans', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Header */
+.header {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem;
+  z-index: 100;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.header h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.icon-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+}
+
+.icon-btn:active { background: var(--card-hover); }
+
+/* Day selector */
+.day-selector {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.3rem;
+  scrollbar-width: none;
+}
+
+.day-selector::-webkit-scrollbar { display: none; }
+
+.day-btn {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.day-btn span {
+  font-size: 0.6rem;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.day-btn.active {
+  background: var(--accent);
+  color: #1a1a1a;
+  border-color: var(--accent);
+}
+
+.day-btn.rest {
+  background: var(--card);
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.day-btn.completed {
+  border-color: var(--green);
+  position: relative;
+}
+
+.day-btn.completed::after {
+  content: "✓";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: var(--green);
+  color: #000;
+  font-size: 0.55rem;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Main content */
+.main {
+  padding: 1rem;
+  padding-bottom: 100px;
+}
+
+.day-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+
+.day-subtitle {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+
+.day-intensity {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+.day-intensity.heavy {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.day-intensity.light {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.day-intensity.maintenance {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-muted);
+}
+
+/* Section headers */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+  margin-top: 1.5rem;
+}
+
+.section-header:first-of-type { margin-top: 0; }
+
+.section-badge {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+}
+
+.section-badge.cardio {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+/* Exercise card */
+.exercise-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 0.8rem;
+  overflow: hidden;
+}
+
+.exercise-header {
+  padding: 1rem;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.exercise-header:active { background: var(--card-hover); }
+
+.exercise-info h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.exercise-target {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+/* Weight hints */
+.weight-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.weight-hint {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.weight-hint.last {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.weight-hint.suggested {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.weight-hint-icon {
+  font-size: 0.65rem;
+}
+
+.exercise-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.set-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.set-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.set-dot.done {
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.expand-icon {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  transition: transform 0.2s;
+}
+
+.exercise-card.expanded .expand-icon {
+  transform: rotate(180deg);
+}
+
+/* Exercise body */
+.exercise-body {
+  display: none;
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.exercise-card.expanded .exercise-body {
+  display: block;
+}
+
+.exercise-note {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.8rem;
+  line-height: 1.5;
+  padding-top: 0.8rem;
+}
+
+/* Suggestion banner in expanded view */
+.suggestion-banner {
+  background: var(--blue-dim);
+  border: 1px solid rgba(96,165,250,0.3);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+  font-size: 0.8rem;
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.suggestion-banner.from-heavy {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+
+.suggestion-banner .suggestion-weight {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+/* Set logging */
+.sets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.set-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.set-row.done .set-num {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+.set-inputs {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.input-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.input-group label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.input-group input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: inherit;
+  width: 100%;
+  text-align: center;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input-group input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.set-row.done .input-group input {
+  border-color: var(--green);
+  background: var(--green-dim);
+}
+
+.log-btn {
+  background: var(--accent);
+  color: #1a1a1a;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.log-btn:active { opacity: 0.8; }
+
+.set-row.done .log-btn {
+  background: var(--green-dim);
+  color: var(--green);
+}
+
+/* Add set button */
+.add-set-btn {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.add-set-btn:active { background: var(--card-hover); }
+
+/* Rest timer */
+.rest-timer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 1rem;
+  transform: translateY(100%);
+  transition: transform 0.3s ease;
+  z-index: 200;
+}
+
+.rest-timer.active {
+  transform: translateY(0);
+}
+
+.timer-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.timer-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.timer-display {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.timer-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.timer-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.timer-btn.primary {
+  background: var(--accent);
+  color: #1a1a1a;
+  border-color: var(--accent);
+}
+
+.timer-btn:active { opacity: 0.8; }
+
+/* Quick timer buttons */
+.quick-timers {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.quick-timer-btn {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.quick-timer-btn:active { background: var(--card-hover); }
+
+/* Cardio card */
+.cardio-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.cardio-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.cardio-header h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.cardio-done-btn {
+  background: var(--green-dim);
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  color: var(--green);
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.cardio-done-btn.checked {
+  background: var(--green);
+  color: #000;
+}
+
+.cardio-inputs {
+  display: flex;
+  gap: 0.8rem;
+}
+
+.cardio-inputs .input-group {
+  flex: 1;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+  padding: 1rem;
+}
+
+.modal-overlay.active { display: flex; }
+
+.modal {
+  background: var(--card);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.3rem;
+}
+
+.modal-body {
+  padding: 1rem;
+}
+
+/* History */
+.history-item {
+  padding: 0.8rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-item:last-child { border-bottom: none; }
+
+.history-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.history-exercise {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.history-sets {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Rest day */
+.rest-day {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.rest-day-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.rest-day h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.rest-day p {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Complete workout button */
+.complete-workout-btn {
+  background: var(--green);
+  color: #000;
+  border: none;
+  border-radius: 12px;
+  padding: 1rem;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 1.5rem;
+}
+
+.complete-workout-btn:active { opacity: 0.8; }
+
+.complete-workout-btn:disabled {
+  background: var(--card);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* Utility */
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-top">
+    <h1>14-Day Program</h1>
+    <div class="header-actions">
+      <button class="icon-btn" onclick="showHistory()">📊</button>
+      <button class="icon-btn" onclick="showTimer()">⏱️</button>
+    </div>
+  </div>
+  <div class="day-selector" id="daySelector"></div>
+</header>
+
+<main class="main" id="main"></main>
+
+<!-- Rest Timer -->
+<div class="rest-timer" id="restTimer">
+  <div class="timer-content">
+    <div class="timer-left">
+      <div class="timer-display" id="timerDisplay">2:00</div>
+      <div class="timer-label">Rest Timer</div>
+    </div>
+    <div class="timer-controls">
+      <button class="timer-btn" onclick="adjustTimer(-15)">-15s</button>
+      <button class="timer-btn" onclick="adjustTimer(15)">+15s</button>
+      <button class="timer-btn primary" id="timerToggle" onclick="toggleTimer()">Start</button>
+      <button class="timer-btn" onclick="hideTimer()">✕</button>
+    </div>
+  </div>
+  <div class="quick-timers">
+    <button class="quick-timer-btn" onclick="setTimer(60)">1:00</button>
+    <button class="quick-timer-btn" onclick="setTimer(90)">1:30</button>
+    <button class="quick-timer-btn" onclick="setTimer(120)">2:00</button>
+    <button class="quick-timer-btn" onclick="setTimer(180)">3:00</button>
+  </div>
+</div>
+
+<!-- History Modal -->
+<div class="modal-overlay" id="historyModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Workout History</h2>
+      <button class="modal-close" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="modal-body" id="historyContent"></div>
+  </div>
+</div>
+
+<script>
+// ============ WORKOUT PROGRAM DATA ============
+const program = {
+  1: {
+    title: "Quads + Calves",
+    week: 1,
+    intensity: "heavy",
+    exercises: [
+      { name: "Barbell Back Squat", sets: 4, reps: "6-8", note: "Primary strength driver", id: "squat" },
+      { name: "Leg Press", sets: 3, reps: "10-12", note: "Controlled tempo, full depth", id: "legpress" },
+      { name: "Leg Extension", sets: 3, reps: "12-15", note: "Moderate weight, squeeze at top", id: "legext" },
+      { name: "Walking Lunge", sets: 3, reps: "10/leg", note: "Or split squats", id: "lunge" },
+      { name: "Standing Calf Raise", sets: 4, reps: "12-15", note: "", id: "standcalf" }
+    ],
+    cardio: { name: "Incline Treadmill Walk", duration: 10, note: "Cooldown only" }
+  },
+  2: {
+    title: "Shoulders (Heavy)",
+    week: 1,
+    intensity: "heavy",
+    exercises: [
+      { name: "Overhead Press", sets: 4, reps: "6-8", note: "Barbell or seated DB", id: "ohp" },
+      { name: "DB Lateral Raise", sets: 4, reps: "12-15", note: "", id: "dblateral" },
+      { name: "Cable Lateral Raise", sets: 3, reps: "15-20", note: "", id: "cablelateral" },
+      { name: "Face Pull", sets: 3, reps: "15-20", note: "", id: "facepull" },
+      { name: "Cable Curl", sets: 3, reps: "12-15", note: "Pain-free angle for elbow", id: "cablecurl" },
+      { name: "Eccentric Wrist Extension", sets: 3, reps: "15", note: "Elbow rehab - slow lower", id: "wristext" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  3: {
+    title: "Chest + Triceps",
+    week: 1,
+    intensity: "heavy",
+    exercises: [
+      { name: "Barbell Bench Press", sets: 4, reps: "6-8", note: "", id: "bench" },
+      { name: "Incline DB Press", sets: 3, reps: "8-10", note: "", id: "inclinedb" },
+      { name: "Cable Fly", sets: 3, reps: "12-15", note: "Or pec deck", id: "fly" },
+      { name: "Rope Pushdown", sets: 3, reps: "12-15", note: "Monitor elbow", id: "pushdown" },
+      { name: "Overhead Cable Extension", sets: 2, reps: "15", note: "Skip if elbow flares", id: "ohtri" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  4: {
+    title: "Rest Day",
+    week: 1,
+    rest: true,
+    note: "Walk as usual. Stretch. Elbow rehab if desired."
+  },
+  5: {
+    title: "Hamstrings / Glutes",
+    week: 1,
+    intensity: "moderate",
+    exercises: [
+      { name: "Romanian Deadlift", sets: 4, reps: "8-10", note: "Straps OK for elbow", id: "rdl" },
+      { name: "Lying Leg Curl", sets: 4, reps: "10-12", note: "Control the eccentric", id: "legcurl" },
+      { name: "Hip Thrust", sets: 3, reps: "10-12", note: "Or glute bridge", id: "hipthrust" },
+      { name: "Bulgarian Split Squat", sets: 3, reps: "10/leg", note: "DBs or goblet hold", id: "bss" },
+      { name: "Seated Calf Raise", sets: 4, reps: "15-20", note: "", id: "seatcalf" }
+    ],
+    cardio: { name: "Incline Walk", duration: 10, note: "Cooldown" }
+  },
+  6: {
+    title: "Back + Rear Delts + Bis",
+    week: 1,
+    intensity: "maintenance",
+    exercises: [
+      { name: "Pull-up / Lat Pulldown", sets: 3, reps: "8-10", note: "Neutral grip easier on elbow", id: "pulldown" },
+      { name: "Cable Row", sets: 3, reps: "8-10", note: "Neutral grip, straps OK", id: "cablerow" },
+      { name: "Single Arm DB Row", sets: 2, reps: "10-12", note: "Strap the right hand", id: "dbrow" },
+      { name: "Rear Delt Fly", sets: 3, reps: "15-20", note: "Machine or DB", id: "rearfly" },
+      { name: "Cable Curl", sets: 3, reps: "12-15", note: "", id: "cablecurl" },
+      { name: "Hammer Curl", sets: 2, reps: "12", note: "Skip if elbow complains", id: "hammer" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  7: {
+    title: "Shoulders (Volume) + Light Chest",
+    week: 1,
+    intensity: "light",
+    exercises: [
+      { name: "Seated DB Press", sets: 3, reps: "10-12", note: "Lighter - focus on pump", id: "seateddb", 
+        referenceDay: 2, referenceExercise: "ohp", suggestedPct: 0.70, suggestedNote: "~70% of heavy OHP" },
+      { name: "Lateral Raise", sets: 3, reps: "15-20", note: "Any variation", id: "dblateral" },
+      { name: "Reverse Pec Deck", sets: 3, reps: "15-20", note: "", id: "reversepec" },
+      { name: "Incline DB Press", sets: 3, reps: "10-12", note: "Lighter, chest maintenance", id: "inclinedb",
+        referenceDay: 3, referenceExercise: "inclinedb", suggestedPct: 0.70, suggestedNote: "~70% of Day 3" },
+      { name: "Neck Curl / Extension", sets: 3, reps: "15-20", note: "", id: "neck" }
+    ],
+    cardio: { name: "Stairmaster", duration: 20, note: "Or skip if cooked" }
+  },
+  8: {
+    title: "Quads (High Rep)",
+    week: 2,
+    intensity: "light",
+    exercises: [
+      { name: "Hack Squat", sets: 4, reps: "10-12", note: "Or belt squat", id: "hacksquat",
+        referenceDay: 1, referenceExercise: "squat", suggestedPct: 0.65, suggestedNote: "~65% of squat" },
+      { name: "Front Squat", sets: 3, reps: "10-12", note: "Or goblet squat", id: "frontsquat" },
+      { name: "Leg Extension (Pause)", sets: 3, reps: "15-20", note: "2-sec squeeze at top", id: "legext",
+        referenceDay: 1, referenceExercise: "legext", suggestedPct: 0.60, suggestedNote: "~60% of Day 1" },
+      { name: "Step-Ups", sets: 3, reps: "12/leg", note: "", id: "stepup" },
+      { name: "Standing Calf Raise", sets: 4, reps: "15-20", note: "", id: "standcalf" }
+    ],
+    cardio: { name: "Incline Walk", duration: 10, note: "Cooldown" }
+  },
+  9: {
+    title: "Chest + Shoulder Press + Tris",
+    week: 2,
+    intensity: "moderate",
+    exercises: [
+      { name: "Incline Barbell Press", sets: 4, reps: "6-8", note: "", id: "inclinebb" },
+      { name: "Standing OHP", sets: 3, reps: "8-10", note: "Or landmine press", id: "ohp",
+        referenceDay: 2, referenceExercise: "ohp", suggestedPct: 0.85, suggestedNote: "Slightly lighter than Day 2" },
+      { name: "Flat DB Press", sets: 3, reps: "10-12", note: "", id: "flatdb" },
+      { name: "Lateral Raise", sets: 3, reps: "15", note: "Superset with pushdowns", id: "dblateral" },
+      { name: "Rope Pushdown", sets: 3, reps: "12-15", note: "", id: "pushdown" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  10: {
+    title: "Back + Rear Delts + Bis",
+    week: 2,
+    intensity: "maintenance",
+    exercises: [
+      { name: "Chest-Supported Row", sets: 3, reps: "10-12", note: "Neutral grip", id: "csrow" },
+      { name: "Lat Pulldown (Wide)", sets: 3, reps: "10-12", note: "", id: "pulldown" },
+      { name: "Straight Arm Pulldown", sets: 2, reps: "12-15", note: "Elbow-friendly lat work", id: "straightarm" },
+      { name: "Face Pull", sets: 3, reps: "15-20", note: "", id: "facepull" },
+      { name: "Cable Curl", sets: 3, reps: "12-15", note: "", id: "cablecurl" },
+      { name: "Eccentric Wrist Extension", sets: 3, reps: "15", note: "Elbow rehab", id: "wristext" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  11: {
+    title: "Rest Day",
+    week: 2,
+    rest: true,
+    note: "Walk + stretch + elbow rehab."
+  },
+  12: {
+    title: "Hams / Glutes (Heavy)",
+    week: 2,
+    intensity: "heavy",
+    exercises: [
+      { name: "Conventional Deadlift", sets: 4, reps: "5-6", note: "Heavy pull day for the cycle", id: "deadlift" },
+      { name: "Lying Leg Curl", sets: 3, reps: "8-10", note: "Heavier than Week 1", id: "legcurl",
+        referenceDay: 5, referenceExercise: "legcurl", suggestedPct: 1.10, suggestedNote: "~10% heavier than Day 5" },
+      { name: "Glute-Ham Raise", sets: 3, reps: "10-12", note: "Or weighted back extension", id: "ghr" },
+      { name: "Single Leg RDL", sets: 3, reps: "10/leg", note: "DB or KB", id: "slrdl" },
+      { name: "Seated Calf Raise", sets: 4, reps: "15-20", note: "", id: "seatcalf" }
+    ],
+    cardio: { name: "Incline Walk", duration: 10, note: "Cooldown" }
+  },
+  13: {
+    title: "Shoulders (Lateral/Rear) + Arms",
+    week: 2,
+    intensity: "moderate",
+    exercises: [
+      { name: "Cable Lateral Raise", sets: 3, reps: "15-20", note: "", id: "cablelateral" },
+      { name: "DB Lateral Raise (Heavy)", sets: 3, reps: "12", note: "Cheat the last few, control negative", id: "dblateral" },
+      { name: "Rear Delt Fly", sets: 3, reps: "15-20", note: "", id: "rearfly" },
+      { name: "Cable Curl", sets: 3, reps: "12-15", note: "Elbow-friendly", id: "cablecurl" },
+      { name: "Rope Pushdown", sets: 3, reps: "12-15", note: "", id: "pushdown" },
+      { name: "Hammer Curl", sets: 2, reps: "12", note: "If tolerated", id: "hammer" }
+    ],
+    cardio: { name: "Stairmaster", duration: 25, note: "" }
+  },
+  14: {
+    title: "Weak Points + Accessories",
+    week: 2,
+    intensity: "light",
+    exercises: [
+      { name: "Leg Press (Pump)", sets: 3, reps: "15-20", note: "Light, get blood flowing", id: "legpress",
+        referenceDay: 1, referenceExercise: "legpress", suggestedPct: 0.50, suggestedNote: "~50% - pump only" },
+      { name: "Seated DB Press", sets: 3, reps: "12-15", note: "Extra shoulder volume", id: "seateddb",
+        referenceDay: 2, referenceExercise: "ohp", suggestedPct: 0.60, suggestedNote: "~60% of heavy OHP" },
+      { name: "Machine Chest Press", sets: 2, reps: "10-12", note: "Or dips", id: "machinepress" },
+      { name: "Neck Curl / Extension", sets: 3, reps: "15-20", note: "", id: "neck" },
+      { name: "Hanging Leg Raise", sets: 3, reps: "15", note: "", id: "legraiseabs" },
+      { name: "Cable Crunch", sets: 3, reps: "15", note: "", id: "cablecrunch" }
+    ],
+    cardio: { name: "Stairmaster", duration: 20, note: "Or skip" }
+  }
+};
+
+// ============ STATE ============
+let currentDay = 1;
+let timerSeconds = 120;
+let timerInterval = null;
+let timerRunning = false;
+
+// ============ LOCAL STORAGE ============
+function getData() {
+  const data = localStorage.getItem('workoutData_v2');
+  return data ? JSON.parse(data) : { logs: {}, completed: [], exerciseHistory: {} };
+}
+
+function saveData(data) {
+  localStorage.setItem('workoutData_v2', JSON.stringify(data));
+}
+
+function getLogKey(day, exerciseIndex) {
+  const today = new Date().toISOString().split('T')[0];
+  return `${today}_day${day}_ex${exerciseIndex}`;
+}
+
+function getSetData(day, exerciseIndex, setIndex) {
+  const data = getData();
+  const key = getLogKey(day, exerciseIndex);
+  return data.logs[key]?.[setIndex] || null;
+}
+
+function saveSetData(day, exerciseIndex, setIndex, weight, reps) {
+  const data = getData();
+  const key = getLogKey(day, exerciseIndex);
+  if (!data.logs[key]) data.logs[key] = {};
+  data.logs[key][setIndex] = { weight: parseFloat(weight), reps: parseInt(reps), time: Date.now() };
+  
+  // Also save to exercise history for future reference
+  const ex = program[day].exercises[exerciseIndex];
+  if (ex && ex.id) {
+    if (!data.exerciseHistory) data.exerciseHistory = {};
+    if (!data.exerciseHistory[ex.id]) data.exerciseHistory[ex.id] = [];
+    
+    // Add to history (keep last 20 entries per exercise)
+    data.exerciseHistory[ex.id].push({
+      date: new Date().toISOString().split('T')[0],
+      day: day,
+      weight: parseFloat(weight),
+      reps: parseInt(reps),
+      time: Date.now()
+    });
+    
+    // Keep only last 20
+    if (data.exerciseHistory[ex.id].length > 20) {
+      data.exerciseHistory[ex.id] = data.exerciseHistory[ex.id].slice(-20);
+    }
+  }
+  
+  saveData(data);
+}
+
+function getLastWeight(exerciseId) {
+  const data = getData();
+  if (!data.exerciseHistory || !data.exerciseHistory[exerciseId]) return null;
+  
+  const history = data.exerciseHistory[exerciseId];
+  if (history.length === 0) return null;
+  
+  // Get the most recent entry
+  const last = history[history.length - 1];
+  return { weight: last.weight, reps: last.reps, date: last.date, day: last.day };
+}
+
+function getReferenceWeight(referenceDay, referenceExerciseId) {
+  const data = getData();
+  if (!data.exerciseHistory || !data.exerciseHistory[referenceExerciseId]) return null;
+  
+  const history = data.exerciseHistory[referenceExerciseId];
+  if (history.length === 0) return null;
+  
+  // Get the most recent entry for that exercise
+  const last = history[history.length - 1];
+  return last.weight;
+}
+
+function markDayComplete(day) {
+  const data = getData();
+  const today = new Date().toISOString().split('T')[0];
+  const key = `${today}_day${day}`;
+  if (!data.completed.includes(key)) {
+    data.completed.push(key);
+    saveData(data);
+  }
+}
+
+function isDayComplete(day) {
+  const data = getData();
+  const today = new Date().toISOString().split('T')[0];
+  return data.completed.includes(`${today}_day${day}`);
+}
+
+// ============ RENDER ============
+function renderDaySelector() {
+  const selector = document.getElementById('daySelector');
+  selector.innerHTML = '';
+  
+  for (let d = 1; d <= 14; d++) {
+    const dayData = program[d];
+    const isRest = dayData.rest;
+    const isComplete = isDayComplete(d);
+    const isActive = d === currentDay;
+    
+    const btn = document.createElement('button');
+    btn.className = 'day-btn' + 
+      (isActive ? ' active' : '') + 
+      (isRest ? ' rest' : '') +
+      (isComplete && !isActive ? ' completed' : '');
+    btn.innerHTML = `${d}<span>W${dayData.week}</span>`;
+    btn.onclick = () => selectDay(d);
+    selector.appendChild(btn);
+  }
+  
+  // Scroll to active day
+  setTimeout(() => {
+    const activeBtn = selector.querySelector('.day-btn.active');
+    if (activeBtn) {
+      activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, 100);
+}
+
+function renderWorkout() {
+  const main = document.getElementById('main');
+  const dayData = program[currentDay];
+  
+  if (dayData.rest) {
+    main.innerHTML = `
+      <div class="rest-day">
+        <div class="rest-day-icon">🧘</div>
+        <h2>${dayData.title}</h2>
+        <p>${dayData.note}</p>
+      </div>
+    `;
+    return;
+  }
+  
+  const intensityLabel = {
+    heavy: 'Heavy Day',
+    light: 'Light / Volume Day',
+    moderate: 'Moderate',
+    maintenance: 'Maintenance'
+  };
+  
+  let html = `
+    <div class="day-title">${dayData.title}</div>
+    <div class="day-subtitle">Week ${dayData.week} • Day ${currentDay}</div>
+    <div class="day-intensity ${dayData.intensity}">${intensityLabel[dayData.intensity] || ''}</div>
+    
+    <div class="section-header">
+      <span class="section-badge">Lifting</span>
+    </div>
+  `;
+  
+  dayData.exercises.forEach((ex, i) => {
+    const setsCompleted = countCompletedSets(currentDay, i, ex.sets);
+    const allDone = setsCompleted === ex.sets;
+    
+    // Get weight hints
+    const lastData = ex.id ? getLastWeight(ex.id) : null;
+    let suggestedWeight = null;
+    
+    if (ex.referenceExercise && ex.suggestedPct) {
+      const refWeight = getReferenceWeight(ex.referenceDay, ex.referenceExercise);
+      if (refWeight) {
+        suggestedWeight = Math.round(refWeight * ex.suggestedPct / 5) * 5; // Round to nearest 5
+      }
+    }
+    
+    let hintsHtml = '';
+    if (lastData || suggestedWeight) {
+      hintsHtml = '<div class="weight-hints">';
+      if (lastData) {
+        hintsHtml += `<span class="weight-hint last"><span class="weight-hint-icon">↩</span> Last: ${lastData.weight}×${lastData.reps}</span>`;
+      }
+      if (suggestedWeight) {
+        hintsHtml += `<span class="weight-hint suggested"><span class="weight-hint-icon">💡</span> Try: ~${suggestedWeight}</span>`;
+      }
+      hintsHtml += '</div>';
+    }
+    
+    // Suggestion banner for expanded view
+    let suggestionBanner = '';
+    if (ex.suggestedNote && suggestedWeight) {
+      suggestionBanner = `
+        <div class="suggestion-banner from-heavy">
+          <span>💡</span>
+          <span>${ex.suggestedNote}: <span class="suggestion-weight">~${suggestedWeight} lbs</span></span>
+        </div>
+      `;
+    }
+    
+    html += `
+      <div class="exercise-card" id="ex-${i}">
+        <div class="exercise-header" onclick="toggleExercise(${i})">
+          <div class="exercise-info">
+            <h3>${ex.name}</h3>
+            <div class="exercise-target">${ex.sets} × ${ex.reps}</div>
+            ${hintsHtml}
+          </div>
+          <div class="exercise-status">
+            <div class="set-dots">
+              ${Array(ex.sets).fill(0).map((_, s) => 
+                `<div class="set-dot${getSetData(currentDay, i, s) ? ' done' : ''}"></div>`
+              ).join('')}
+            </div>
+            <span class="expand-icon">▼</span>
+          </div>
+        </div>
+        <div class="exercise-body">
+          ${ex.note ? `<div class="exercise-note">${ex.note}</div>` : '<div style="height:0.5rem"></div>'}
+          ${suggestionBanner}
+          <div class="sets-list">
+            ${renderSets(currentDay, i, ex.sets, ex.reps, lastData?.weight, suggestedWeight)}
+          </div>
+          <button class="add-set-btn" onclick="addSet(${i})">+ Add Set</button>
+        </div>
+      </div>
+    `;
+  });
+  
+  if (dayData.cardio) {
+    const cardioKey = getLogKey(currentDay, 'cardio');
+    const cardioData = getData().logs[cardioKey] || {};
+    
+    html += `
+      <div class="section-header">
+        <span class="section-badge cardio">Cardio</span>
+      </div>
+      <div class="cardio-card">
+        <div class="cardio-header">
+          <h3>${dayData.cardio.name}</h3>
+          <button class="cardio-done-btn${cardioData.done ? ' checked' : ''}" onclick="toggleCardio()">
+            ${cardioData.done ? '✓ Done' : 'Mark Done'}
+          </button>
+        </div>
+        <div class="cardio-inputs">
+          <div class="input-group">
+            <label>Duration (min)</label>
+            <input type="number" value="${cardioData.duration || dayData.cardio.duration}" 
+              onchange="saveCardio('duration', this.value)">
+          </div>
+          <div class="input-group">
+            <label>Notes</label>
+            <input type="text" placeholder="${dayData.cardio.note || 'Optional'}"
+              value="${cardioData.notes || ''}"
+              onchange="saveCardio('notes', this.value)">
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  
+  html += `
+    <button class="complete-workout-btn" onclick="completeWorkout()">
+      ✓ Complete Workout
+    </button>
+  `;
+  
+  main.innerHTML = html;
+}
+
+function renderSets(day, exerciseIndex, numSets, targetReps, lastWeight, suggestedWeight) {
+  let html = '';
+  
+  // Get any extra sets added
+  const data = getData();
+  const key = getLogKey(day, exerciseIndex);
+  const loggedSets = data.logs[key] || {};
+  const maxSet = Math.max(numSets - 1, ...Object.keys(loggedSets).filter(k => loggedSets[k]).map(Number));
+  
+  // Determine placeholder weight
+  const placeholderWeight = suggestedWeight || lastWeight || '';
+  
+  for (let s = 0; s <= maxSet; s++) {
+    const setData = loggedSets[s];
+    const isDone = !!setData;
+    
+    html += `
+      <div class="set-row${isDone ? ' done' : ''}" data-set="${s}">
+        <div class="set-num">${s + 1}</div>
+        <div class="set-inputs">
+          <div class="input-group">
+            <label>Weight</label>
+            <input type="number" id="weight-${exerciseIndex}-${s}" 
+              value="${setData?.weight || ''}" 
+              placeholder="${placeholderWeight}"
+              onchange="autoSaveSet(${exerciseIndex}, ${s})">
+          </div>
+          <div class="input-group">
+            <label>Reps</label>
+            <input type="number" id="reps-${exerciseIndex}-${s}" 
+              value="${setData?.reps || ''}" placeholder="${targetReps}"
+              onchange="autoSaveSet(${exerciseIndex}, ${s})">
+          </div>
+        </div>
+        <button class="log-btn" onclick="logSet(${exerciseIndex}, ${s})">
+          ${isDone ? '✓' : 'Log'}
+        </button>
+      </div>
+    `;
+  }
+  
+  return html;
+}
+
+function countCompletedSets(day, exerciseIndex, targetSets) {
+  const data = getData();
+  const key = getLogKey(day, exerciseIndex);
+  const loggedSets = data.logs[key] || {};
+  return Object.values(loggedSets).filter(s => s && s.weight).length;
+}
+
+// ============ ACTIONS ============
+function selectDay(day) {
+  currentDay = day;
+  renderDaySelector();
+  renderWorkout();
+}
+
+function toggleExercise(index) {
+  const card = document.getElementById(`ex-${index}`);
+  card.classList.toggle('expanded');
+}
+
+function logSet(exerciseIndex, setIndex) {
+  const weightInput = document.getElementById(`weight-${exerciseIndex}-${setIndex}`);
+  const repsInput = document.getElementById(`reps-${exerciseIndex}-${setIndex}`);
+  
+  let weight = weightInput.value || weightInput.placeholder;
+  let reps = repsInput.value || repsInput.placeholder.split('-')[0]; // Take lower end of rep range
+  
+  if (weight && reps) {
+    // Update input values to show what was logged
+    weightInput.value = weight;
+    repsInput.value = reps;
+    
+    saveSetData(currentDay, exerciseIndex, setIndex, weight, reps);
+    renderWorkout();
+    showTimer();
+    
+    // Re-expand the card
+    setTimeout(() => {
+      document.getElementById(`ex-${exerciseIndex}`).classList.add('expanded');
+    }, 50);
+  }
+}
+
+function autoSaveSet(exerciseIndex, setIndex) {
+  const weightInput = document.getElementById(`weight-${exerciseIndex}-${setIndex}`);
+  const repsInput = document.getElementById(`reps-${exerciseIndex}-${setIndex}`);
+  
+  if (weightInput.value && repsInput.value) {
+    saveSetData(currentDay, exerciseIndex, setIndex, weightInput.value, repsInput.value);
+  }
+}
+
+function addSet(exerciseIndex) {
+  const data = getData();
+  const key = getLogKey(currentDay, exerciseIndex);
+  const loggedSets = data.logs[key] || {};
+  const ex = program[currentDay].exercises[exerciseIndex];
+  const existingSetNums = Object.keys(loggedSets).filter(k => loggedSets[k]).map(Number);
+  const maxSet = Math.max(ex.sets - 1, ...existingSetNums);
+  
+  // Add placeholder for new set
+  if (!data.logs[key]) data.logs[key] = {};
+  data.logs[key][maxSet + 1] = { placeholder: true };
+  saveData(data);
+  renderWorkout();
+  
+  // Expand the card
+  setTimeout(() => {
+    document.getElementById(`ex-${exerciseIndex}`).classList.add('expanded');
+  }, 50);
+}
+
+function toggleCardio() {
+  const data = getData();
+  const key = getLogKey(currentDay, 'cardio');
+  if (!data.logs[key]) data.logs[key] = {};
+  data.logs[key].done = !data.logs[key].done;
+  saveData(data);
+  renderWorkout();
+}
+
+function saveCardio(field, value) {
+  const data = getData();
+  const key = getLogKey(currentDay, 'cardio');
+  if (!data.logs[key]) data.logs[key] = {};
+  data.logs[key][field] = value;
+  saveData(data);
+}
+
+function completeWorkout() {
+  markDayComplete(currentDay);
+  renderDaySelector();
+  alert('Workout complete! 💪');
+}
+
+// ============ TIMER ============
+function showTimer() {
+  document.getElementById('restTimer').classList.add('active');
+}
+
+function hideTimer() {
+  document.getElementById('restTimer').classList.remove('active');
+  stopTimer();
+}
+
+function setTimer(seconds) {
+  timerSeconds = seconds;
+  updateTimerDisplay();
+}
+
+function adjustTimer(delta) {
+  timerSeconds = Math.max(0, timerSeconds + delta);
+  updateTimerDisplay();
+}
+
+function toggleTimer() {
+  if (timerRunning) {
+    stopTimer();
+  } else {
+    startTimer();
+  }
+}
+
+function startTimer() {
+  timerRunning = true;
+  document.getElementById('timerToggle').textContent = 'Stop';
+  
+  timerInterval = setInterval(() => {
+    timerSeconds--;
+    updateTimerDisplay();
+    
+    if (timerSeconds <= 0) {
+      stopTimer();
+      vibrateAndNotify();
+      timerSeconds = 120; // reset
+      updateTimerDisplay();
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  timerRunning = false;
+  document.getElementById('timerToggle').textContent = 'Start';
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
+function updateTimerDisplay() {
+  const mins = Math.floor(timerSeconds / 60);
+  const secs = timerSeconds % 60;
+  document.getElementById('timerDisplay').textContent = 
+    `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function vibrateAndNotify() {
+  if (navigator.vibrate) {
+    navigator.vibrate([200, 100, 200, 100, 200]);
+  }
+}
+
+// ============ HISTORY ============
+function showHistory() {
+  const modal = document.getElementById('historyModal');
+  const content = document.getElementById('historyContent');
+  
+  const data = getData();
+  
+  // Build history from exerciseHistory (more reliable)
+  let html = '';
+  
+  if (!data.exerciseHistory || Object.keys(data.exerciseHistory).length === 0) {
+    html = '<p style="color: var(--text-muted); text-align: center;">No workout history yet. Start logging sets!</p>';
+  } else {
+    // Group by date
+    const byDate = {};
+    
+    for (const exId in data.exerciseHistory) {
+      const entries = data.exerciseHistory[exId];
+      entries.forEach(entry => {
+        if (!byDate[entry.date]) byDate[entry.date] = {};
+        if (!byDate[entry.date][exId]) byDate[entry.date][exId] = [];
+        byDate[entry.date][exId].push(entry);
+      });
+    }
+    
+    // Find exercise name by ID
+    const findExerciseName = (id) => {
+      for (const day in program) {
+        if (program[day].exercises) {
+          const ex = program[day].exercises.find(e => e.id === id);
+          if (ex) return ex.name;
+        }
+      }
+      return id;
+    };
+    
+    const dates = Object.keys(byDate).sort().reverse();
+    
+    dates.slice(0, 10).forEach(date => {
+      const exercises = byDate[date];
+      
+      for (const exId in exercises) {
+        const sets = exercises[exId];
+        const name = findExerciseName(exId);
+        
+        html += `
+          <div class="history-item">
+            <div class="history-date">${date}</div>
+            <div class="history-exercise">${name}</div>
+            <div class="history-sets">
+              ${sets.map(s => `${s.weight}×${s.reps}`).join(', ')}
+            </div>
+          </div>
+        `;
+      }
+    });
+  }
+  
+  content.innerHTML = html;
+  modal.classList.add('active');
+}
+
+function closeHistory() {
+  document.getElementById('historyModal').classList.remove('active');
+}
+
+// Close modal on overlay click
+document.getElementById('historyModal').addEventListener('click', (e) => {
+  if (e.target.id === 'historyModal') closeHistory();
+});
+
+// ============ INIT ============
+function init() {
+  renderDaySelector();
+  renderWorkout();
+}
+
+init();
+</script>
+
+</body>
+</html>
