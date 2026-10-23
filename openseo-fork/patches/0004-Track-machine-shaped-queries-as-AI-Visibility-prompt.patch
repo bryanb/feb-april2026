@@ -1,0 +1,147 @@
+From 7e1972372ac031a3e7eaf9c8b8937213b081f11c Mon Sep 17 00:00:00 2001
+From: Bryan B <bbigari@gmail.com>
+Date: Fri, 23 Oct 2026 12:25:13 +0000
+Subject: [PATCH 4/4] Track machine-shaped queries as AI Visibility prompts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Closes the loop between the two features: a query assistants are already
+issuing is the best evidence of what is worth monitoring, so selecting rows
+sends them straight to the project's tracker instead of being retyped.
+
+Only formatting is stripped from the query — quotes, markdown, operators —
+because the wording is the thing worth tracking.
+
+Prompts merge rather than replace: the save path clones the existing
+configuration and applies a patch, so adding from here cannot disturb
+prompts already on the tracker, and duplicates come back as skipped. The
+toast reports what actually landed rather than echoing the count selected.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JTBKYzux1gqV8tvd3Q9XBN
+---
+ .../MachineQueriesSection.tsx                 | 76 +++++++++++++++++++
+ 1 file changed, 76 insertions(+)
+
+diff --git a/src/client/features/ai-search-signals/MachineQueriesSection.tsx b/src/client/features/ai-search-signals/MachineQueriesSection.tsx
+index 0f74cee0..6c1a0679 100644
+--- a/src/client/features/ai-search-signals/MachineQueriesSection.tsx
++++ b/src/client/features/ai-search-signals/MachineQueriesSection.tsx
+@@ -1,9 +1,21 @@
++import { useState } from "react";
+ import { Link } from "@tanstack/react-router";
++import { useMutation } from "@tanstack/react-query";
++import { Loader2, Radar } from "lucide-react";
++import { toast } from "sonner";
+ import {
+   AI_QUERY_SIGNALS,
+   type AiQueryClassification,
++  normalizeMachineQuery,
+ } from "@/shared/ai-query-signals";
+ import { Badge } from "@/client/components/ui/badge";
++import { Checkbox } from "@/client/components/ui/checkbox";
++import {
++  TableBulkActionBar,
++  TableBulkActionButton,
++} from "@/client/components/table/TableBulkActionBar";
++import { getStandardErrorMessage } from "@/client/lib/error-messages";
++import { saveAiVisibilityTracker } from "@/serverFunctions/ai-visibility";
+ import {
+   Card,
+   CardContent,
+@@ -51,6 +63,40 @@ export function MachineQueriesSection({
+   allImpressions: number;
+   truncated: boolean;
+ }) {
++  const [selected, setSelected] = useState<Set<string>>(new Set());
++  const selectedQueries = queries.filter((row) => selected.has(row.query));
++
++  const track = useMutation({
++    mutationFn: (rows: QueryRow[]) =>
++      saveAiVisibilityTracker({
++        data: {
++          projectId,
++          // Only formatting is stripped; the wording is what gets tracked.
++          prompts: rows.map((row) => ({
++            text: normalizeMachineQuery(row.query),
++            topic: "From Search Console",
++          })),
++        },
++      }),
++    onSuccess: (result) => {
++      setSelected(new Set());
++      // Duplicates are skipped server-side, so say what actually landed
++      // rather than echoing the number selected.
++      const skipped = result.skipped
++        ? `, ${result.skipped} already tracked`
++        : "";
++      toast.success(`Added ${result.created} prompt(s)${skipped}.`);
++    },
++    onError: (error) => toast.error(getStandardErrorMessage(error)),
++  });
++
++  const toggle = (query: string) =>
++    setSelected((previous) => {
++      const next = new Set(previous);
++      if (next.has(query)) next.delete(query);
++      else next.add(query);
++      return next;
++    });
+   const share =
+     allImpressions === 0 ? null : matchedImpressions / allImpressions;
+   return (
+@@ -101,6 +147,7 @@ export function MachineQueriesSection({
+           <Table>
+             <TableHeader>
+               <TableRow>
++                <TableHead className="w-8" />
+                 <TableHead>Query</TableHead>
+                 <TableHead>Signals</TableHead>
+                 <TableHead className="text-right">Clicks</TableHead>
+@@ -112,6 +159,13 @@ export function MachineQueriesSection({
+             <TableBody>
+               {queries.slice(0, 100).map((row) => (
+                 <TableRow key={row.query}>
++                  <TableCell>
++                    <Checkbox
++                      checked={selected.has(row.query)}
++                      onCheckedChange={() => toggle(row.query)}
++                      aria-label={`Track ${row.query}`}
++                    />
++                  </TableCell>
+                   <TableCell className="max-w-md break-words font-mono text-xs">
+                     {row.query}
+                   </TableCell>
+@@ -161,6 +215,28 @@ export function MachineQueriesSection({
+             Open these queries in Search Performance
+           </Link>
+         </div>
++        <TableBulkActionBar
++          selectedCount={selectedQueries.length}
++          selectedLabel={selectedQueries.length === 1 ? "query" : "queries"}
++          onClear={() => setSelected(new Set())}
++          actions={
++            <div className="flex items-center gap-1 px-1.5">
++              <TableBulkActionButton
++                icon={
++                  track.isPending ? (
++                    <Loader2 className="size-3.5 animate-spin" />
++                  ) : (
++                    <Radar className="size-3.5" />
++                  )
++                }
++                onClick={() => track.mutate(selectedQueries)}
++                disabled={track.isPending}
++              >
++                Track as prompts
++              </TableBulkActionButton>
++            </div>
++          }
++        />
+       </CardContent>
+     </Card>
+   );
+-- 
+2.43.0
+
