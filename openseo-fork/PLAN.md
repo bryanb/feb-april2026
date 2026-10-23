@@ -126,3 +126,69 @@ The planning pass contradicted three things I had told Bryan:
   passes any explicit `rowLimit` up to 25,000; the cap lives in the MCP tool
   and the Search Performance server functions only.
 - Baseline urgency was overstated for GSC, per the storage note above.
+
+---
+
+## Bing: researched, recommendation is **don't build** (Oct 2026)
+
+### What Bing has
+
+**AI Performance** report in Bing Webmaster Tools (public preview Feb 2026,
+expanded Jun and Oct 2026). Genuinely the best first-party AI data any search
+engine gives site owners: total citations, cited pages, *grounding queries*
+(the phrases the AI used when retrieving your content), citation share, and
+intent/topic classification. Covers Copilot, Bing AI summaries, and
+unnamed "select partner integrations".
+
+### Why it does not help us
+
+1. **UI-only. There is no API.** The Bing Webmaster API method list contains
+   nothing for citations or grounding queries; a Microsoft Q&A thread (Feb
+   2026) and third-party guides through Oct 2026 confirm it. Export is manual
+   CSV. This is the exact failure mode we hit with Google's generative AI
+   report — unusable across 27 properties.
+2. **No clicks, no per-surface split.** Microsoft states the report "does not
+   represent traffic, clicks, or user engagement", queries are a *sample*,
+   and you cannot separate Copilot from Bing summaries from partners. Even
+   with an API you could not tell a client "this is your Copilot number".
+3. **Bing is no longer a good ChatGPT proxy.** This corrects my earlier
+   framing. Independent 2026 measurement (RESONEO via Search Engine Land,
+   Peec AI) reading ChatGPT's own `result_source` field found consumer
+   retrieval runs on OpenAI's own index plus scraped Google, with Bing absent
+   from captures; Bing appears mainly on Team/Enterprise/Edu accounts and
+   Deep Research. OpenAI's help docs now name Bing only for Enterprise/Edu.
+
+### What Bing API *can* give (not AI-specific)
+
+A second first-party clicks/impressions/position series per query and page
+(`GetQueryStats`, `GetPageStats`), daily site totals that silently include
+Copilot/chat traffic (`GetRankAndTrafficStats`, blended since Sept 2023 with
+no way to isolate it), Bingbot crawl/index status, and backlinks. Auth is a
+single API key covering every verified site. Roughly a day or two of work —
+scope it as an ordinary "Bing Search Performance" source, never as an AI
+feature.
+
+For industrial B2B this is marginal but not zero: Edge/Windows default search
+in manufacturing offices is real traffic.
+
+### IndexNow
+
+Push protocol (Bing, Yandex, Naver, Seznam, Yep — **not** Google, and not
+ChatGPT/Claude/Perplexity). Microsoft positions it as improving freshness in
+Copilot answers. **Cloudflare can enable it with a zero-code toggle**
+(Crawler Hints), which is the cheapest version for any client site already on
+Cloudflare. It is crawl hygiene, not an AI-visibility lever, and produces no
+measurement data.
+
+### Also worth knowing
+
+Bing has **no AI-crawler traffic reporting** — nothing showing GPTBot,
+ClaudeBot or PerplexityBot hitting a site. Cloudflare's own bot analytics is
+the right source for that, and is a more promising direction than Bing.
+
+### Revisit when
+
+Microsoft ships an AI Performance API — watch blogs.bing.com/webmaster and
+the `IWebmasterApi` method list for a citations/grounding method, or a "Chat"
+breakdown in `GetRankAndTrafficStats`. They have shipped AI Performance
+features every 2-3 months, so it is plausible, but there is no commitment.
