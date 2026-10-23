@@ -1,7 +1,7 @@
 From a36d8d251e183a25e2f67f9cb74a00c6dda9c893 Mon Sep 17 00:00:00 2001
 From: Bryan B <bbigari@gmail.com>
 Date: Fri, 23 Oct 2026 02:15:48 +0000
-Subject: [PATCH 3/4] Add AI Search Signals page
+Subject: [PATCH 3/5] Add AI Search Signals page
 
 One page for "where do we show up in AI search", with the two kinds of
 evidence kept visibly apart rather than blended into a single number.

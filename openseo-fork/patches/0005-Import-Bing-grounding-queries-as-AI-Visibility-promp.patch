@@ -1,0 +1,602 @@
+From 596e60f24ffb437887c9d853bcb2a74a18515dcb Mon Sep 17 00:00:00 2001
+From: Bryan B <bbigari@gmail.com>
+Date: Fri, 23 Oct 2026 14:38:38 +0000
+Subject: [PATCH 5/5] Import Bing grounding queries as AI Visibility prompts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Grounding queries are the phrases an AI actually used when it retrieved and
+cited a page — the only first-party record of that anywhere, and a far better
+basis for choosing what to track than syntax inferred from Search Console.
+
+Bing exposes them in its web app only: the published Webmaster API has no
+method for them, and the app's own endpoint authenticates with a session
+cookie and CSRF token, so this app cannot fetch them itself. The owner
+exports from their own browser and pastes the result here.
+
+Both routes people actually have are accepted — the CSV download and the raw
+JSON response — because their field names differ ("Grounding query" versus
+GroundingQuery, "Citation share" versus CitationRate). Columns match on a
+normalized heading rather than exact text, and a rate Bing omits stays null
+so it renders as "—" rather than 0%, which would read as never cited.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JTBKYzux1gqV8tvd3Q9XBN
+---
+ .../ai-search-signals/AiSearchSignalsPage.tsx |   3 +
+ .../ai-search-signals/BingImportSection.tsx   | 196 ++++++++++++++
+ src/shared/bing-ai-performance.test.ts        |  88 +++++++
+ src/shared/bing-ai-performance.ts             | 241 ++++++++++++++++++
+ 4 files changed, 528 insertions(+)
+ create mode 100644 src/client/features/ai-search-signals/BingImportSection.tsx
+ create mode 100644 src/shared/bing-ai-performance.test.ts
+ create mode 100644 src/shared/bing-ai-performance.ts
+
+diff --git a/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx b/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
+index 7cd13939..b78b2b28 100644
+--- a/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
++++ b/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
+@@ -10,6 +10,7 @@ import {
+ } from "@/client/components/ui/select";
+ import { GoogleConnectionCard } from "@/client/features/integrations/GoogleConnectionCard";
+ import { AiReferralsSection } from "./AiReferralsSection";
++import { BingImportSection } from "./BingImportSection";
+ import { MachineQueriesSection } from "./MachineQueriesSection";
+ import {
+   aiQuerySignalsQueryOptions,
+@@ -109,6 +110,8 @@ export function AiSearchSignalsPage({
+           />
+         ) : null}
+ 
++        <BingImportSection projectId={projectId} />
++
+         {signalsQuery.isPending ? (
+           <Spinner />
+         ) : signalsQuery.isError ? (
+diff --git a/src/client/features/ai-search-signals/BingImportSection.tsx b/src/client/features/ai-search-signals/BingImportSection.tsx
+new file mode 100644
+index 00000000..ec647cb3
+--- /dev/null
++++ b/src/client/features/ai-search-signals/BingImportSection.tsx
+@@ -0,0 +1,196 @@
++import { useState } from "react";
++import { useMutation } from "@tanstack/react-query";
++import { Loader2, Radar } from "lucide-react";
++import { toast } from "sonner";
++import {
++  parseBingAiPerformance,
++  type BingGroundingQuery,
++} from "@/shared/bing-ai-performance";
++import { Badge } from "@/client/components/ui/badge";
++import { Button } from "@/client/components/ui/button";
++import { Checkbox } from "@/client/components/ui/checkbox";
++import { Textarea } from "@/client/components/ui/textarea";
++import {
++  Card,
++  CardContent,
++  CardDescription,
++  CardHeader,
++  CardTitle,
++} from "@/client/components/ui/card";
++import {
++  Table,
++  TableBody,
++  TableCell,
++  TableHead,
++  TableHeader,
++  TableRow,
++} from "@/client/components/ui/table";
++import {
++  TableBulkActionBar,
++  TableBulkActionButton,
++} from "@/client/components/table/TableBulkActionBar";
++import { getStandardErrorMessage } from "@/client/lib/error-messages";
++import { saveAiVisibilityTracker } from "@/serverFunctions/ai-visibility";
++
++const integer = new Intl.NumberFormat();
++const percent = new Intl.NumberFormat(undefined, {
++  style: "percent",
++  maximumFractionDigits: 1,
++});
++
++export function BingImportSection({ projectId }: { projectId: string }) {
++  const [raw, setRaw] = useState("");
++  const [queries, setQueries] = useState<BingGroundingQuery[]>([]);
++  const [selected, setSelected] = useState<Set<string>>(new Set());
++  const selectedQueries = queries.filter((row) => selected.has(row.query));
++
++  const load = () => {
++    const result = parseBingAiPerformance(raw);
++    if (!result.ok) {
++      toast.error(result.error);
++      return;
++    }
++    if (result.value.queries.length === 0) {
++      toast.error(
++        "That export has cited pages but no grounding queries. Paste the grounding-queries response to pick prompts.",
++      );
++      return;
++    }
++    setQueries(result.value.queries);
++    setSelected(new Set());
++    const total = result.value.reportedQueryTotal;
++    const partial =
++      total && total > result.value.queries.length
++        ? ` Bing reports ${total} in total, so this paste is partial.`
++        : "";
++    toast.success(
++      `Loaded ${result.value.queries.length} grounding queries.${partial}`,
++    );
++  };
++
++  const track = useMutation({
++    mutationFn: (rows: BingGroundingQuery[]) =>
++      saveAiVisibilityTracker({
++        data: {
++          projectId,
++          prompts: rows.map((row) => ({
++            text: row.query,
++            topic: "From Bing AI",
++          })),
++        },
++      }),
++    onSuccess: (result) => {
++      setSelected(new Set());
++      const skipped = result.skipped
++        ? `, ${result.skipped} already tracked`
++        : "";
++      toast.success(`Added ${result.created} prompt(s)${skipped}.`);
++    },
++    onError: (error) => toast.error(getStandardErrorMessage(error)),
++  });
++
++  const toggle = (query: string) =>
++    setSelected((previous) => {
++      const next = new Set(previous);
++      if (next.has(query)) next.delete(query);
++      else next.add(query);
++      return next;
++    });
++
++  return (
++    <Card>
++      <CardHeader>
++        <CardTitle>Measured: grounding queries from Bing</CardTitle>
++        <CardDescription>
++          The phrases an AI actually used when it retrieved and cited your pages
++          — the closest thing to ground truth available anywhere. Bing exposes
++          this in its web app only, with no API, so paste the export here. These
++          make better tracked prompts than anything inferred from Search
++          Console.
++        </CardDescription>
++      </CardHeader>
++      <CardContent className="space-y-4">
++        <div className="space-y-2">
++          <Textarea
++            value={raw}
++            onChange={(event) => setRaw(event.target.value)}
++            placeholder={`Paste the Bing AI Performance export for this site — either the CSV download or the JSON response, e.g. {"Queries":[...]}`}
++            className="h-28 font-mono text-xs"
++            aria-label="Bing AI Performance export (CSV or JSON)"
++          />
++          <Button size="sm" onClick={load} disabled={!raw.trim()}>
++            Load export
++          </Button>
++        </div>
++
++        {queries.length > 0 ? (
++          <Table>
++            <TableHeader>
++              <TableRow>
++                <TableHead className="w-8" />
++                <TableHead>Grounding query</TableHead>
++                <TableHead>Intent</TableHead>
++                <TableHead className="text-right">Citations</TableHead>
++                <TableHead className="text-right">Citation rate</TableHead>
++              </TableRow>
++            </TableHeader>
++            <TableBody>
++              {queries.map((row) => (
++                <TableRow key={row.query}>
++                  <TableCell>
++                    <Checkbox
++                      checked={selected.has(row.query)}
++                      onCheckedChange={() => toggle(row.query)}
++                      aria-label={`Track ${row.query}`}
++                    />
++                  </TableCell>
++                  <TableCell className="max-w-md break-words">
++                    {row.query}
++                  </TableCell>
++                  <TableCell className="space-x-1">
++                    {row.intents.map((intent) => (
++                      <Badge key={intent} variant="outline">
++                        {intent}
++                      </Badge>
++                    ))}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.citations)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {row.citationRate === null
++                      ? "—"
++                      : percent.format(row.citationRate)}
++                  </TableCell>
++                </TableRow>
++              ))}
++            </TableBody>
++          </Table>
++        ) : null}
++
++        <TableBulkActionBar
++          selectedCount={selectedQueries.length}
++          selectedLabel={selectedQueries.length === 1 ? "query" : "queries"}
++          onClear={() => setSelected(new Set())}
++          actions={
++            <div className="flex items-center gap-1 px-1.5">
++              <TableBulkActionButton
++                icon={
++                  track.isPending ? (
++                    <Loader2 className="size-3.5 animate-spin" />
++                  ) : (
++                    <Radar className="size-3.5" />
++                  )
++                }
++                onClick={() => track.mutate(selectedQueries)}
++                disabled={track.isPending}
++              >
++                Track as prompts
++              </TableBulkActionButton>
++            </div>
++          }
++        />
++      </CardContent>
++    </Card>
++  );
++}
+diff --git a/src/shared/bing-ai-performance.test.ts b/src/shared/bing-ai-performance.test.ts
+new file mode 100644
+index 00000000..aaa67f3e
+--- /dev/null
++++ b/src/shared/bing-ai-performance.test.ts
+@@ -0,0 +1,88 @@
++import { describe, expect, it } from "vitest";
++import { parseBingAiPerformance } from "@/shared/bing-ai-performance";
++
++// Trimmed from a real grounding-queries response.
++const queriesResponse = JSON.stringify({
++  Queries: [
++    {
++      GroundingQuery: "can to ethernet converter",
++      Intent: ["Commercial"],
++      Citations: 580,
++      TopicClusters: ["Cables & Adapters"],
++      Topics: [],
++      CitationRate: 0.3806,
++    },
++  ],
++  TotalNumOfRecords: 36,
++  SiteUrl: "https://www.axiomatic.com/",
++});
++
++describe("parseBingAiPerformance", () => {
++  it("reads a grounding-queries response", () => {
++    const result = parseBingAiPerformance(queriesResponse);
++    expect(result).toEqual({
++      ok: true,
++      value: {
++        siteUrl: "https://www.axiomatic.com/",
++        queries: [
++          {
++            query: "can to ethernet converter",
++            citations: 580,
++            citationRate: 0.3806,
++            intents: ["Commercial"],
++            topics: ["Cables & Adapters"],
++          },
++        ],
++        pages: [],
++        reportedQueryTotal: 36,
++      },
++    });
++  });
++
++  it("reads a pages response", () => {
++    const result = parseBingAiPerformance(
++      JSON.stringify({
++        Pages: [{ PageUrl: "https://www.axiomatic.com/", Citations: 1346 }],
++        TotalNumOfRecords: 314,
++      }),
++    );
++    expect(result.ok && result.value.pages).toEqual([
++      { url: "https://www.axiomatic.com/", citations: 1346 },
++    ]);
++  });
++
++  it("keeps a missing citation rate distinguishable from zero", () => {
++    // A rate Bing omitted must not render as 0%, which would read as
++    // "never cited" for a phrase that is in fact cited.
++    const result = parseBingAiPerformance(
++      JSON.stringify({ Queries: [{ GroundingQuery: "x", Citations: 5 }] }),
++    );
++    expect(result.ok && result.value.queries[0]?.citationRate).toBeNull();
++  });
++
++  it("reads the UI's CSV export, whose headings differ from the JSON fields", () => {
++    // The CSV says "Grounding query" and "Citation share"; the JSON says
++    // GroundingQuery and CitationRate. Matching on exact text would silently
++    // drop every column from the download route.
++    const csv = [
++      "Grounding query,Intent,Topic,Citations,Citation share",
++      '"can to ethernet converter",Commercial,"Cables & Adapters",580,38.06%',
++    ].join("\n");
++    const result = parseBingAiPerformance(csv);
++    const row = result.ok ? result.value.queries[0] : null;
++    expect(row).toMatchObject({
++      query: "can to ethernet converter",
++      citations: 580,
++      intents: ["Commercial"],
++      topics: ["Cables & Adapters"],
++    });
++    // Percent-to-fraction division is lossy; Bing's own JSON reports this
++    // same value as 0.38060000000000005.
++    expect(row?.citationRate).toBeCloseTo(0.3806, 6);
++  });
++
++  it("explains an unrecognized paste instead of throwing", () => {
++    expect(parseBingAiPerformance("{}")).toMatchObject({ ok: false });
++    expect(parseBingAiPerformance("not json")).toMatchObject({ ok: false });
++  });
++});
+diff --git a/src/shared/bing-ai-performance.ts b/src/shared/bing-ai-performance.ts
+new file mode 100644
+index 00000000..7b5f8e0b
+--- /dev/null
++++ b/src/shared/bing-ai-performance.ts
+@@ -0,0 +1,241 @@
++/**
++ * Parses a Bing Webmaster Tools "AI Performance" export.
++ *
++ * Grounding queries are the phrases an AI actually used when it retrieved and
++ * cited a page — the only first-party record of that anywhere. Bing exposes
++ * them in its web app only: the published Webmaster API has no method for
++ * them, and the app's own endpoint rides a session cookie and CSRF token, so
++ * the app cannot fetch this itself. The owner exports it from their browser
++ * and pastes it here.
++ *
++ * Two shapes are accepted, because both are things a person will realistically
++ * paste: a single raw response from one of Bing's endpoints, or an object
++ * combining the queries and pages responses.
++ */
++
++import Papa from "papaparse";
++import { z } from "zod";
++
++const groundingQueryRow = z
++  .object({
++    GroundingQuery: z.string().min(1),
++    Citations: z.number().nonnegative(),
++    /** Share of retrievals for this phrase that cited the site, 0-1. */
++    CitationRate: z.number().optional(),
++    Intent: z.array(z.string()).optional(),
++    TopicClusters: z.array(z.string()).optional(),
++  })
++  .passthrough();
++
++const citedPageRow = z
++  .object({
++    PageUrl: z.string().min(1),
++    Citations: z.number().nonnegative(),
++  })
++  .passthrough();
++
++/** Both endpoints wrap their rows and report a total beyond the page fetched. */
++const queriesResponse = z.object({
++  Queries: z.array(groundingQueryRow),
++  TotalNumOfRecords: z.number().optional(),
++  SiteUrl: z.string().optional(),
++});
++
++const pagesResponse = z.object({
++  Pages: z.array(citedPageRow),
++  TotalNumOfRecords: z.number().optional(),
++  SiteUrl: z.string().optional(),
++});
++
++const combinedExport = z.object({
++  site: z.string().optional(),
++  queries: z.array(groundingQueryRow).optional(),
++  pages: z.array(citedPageRow).optional(),
++});
++
++export interface BingGroundingQuery {
++  query: string;
++  citations: number;
++  /** Null when Bing omitted it, so the UI can show "—" rather than 0%. */
++  citationRate: number | null;
++  intents: string[];
++  topics: string[];
++}
++
++interface BingCitedPage {
++  url: string;
++  citations: number;
++}
++
++interface BingAiPerformanceImport {
++  siteUrl: string | null;
++  queries: BingGroundingQuery[];
++  pages: BingCitedPage[];
++  /** Bing's own total, when present, so a partial paste is visible as partial. */
++  reportedQueryTotal: number | null;
++}
++
++const toQuery = (
++  row: z.infer<typeof groundingQueryRow>,
++): BingGroundingQuery => ({
++  query: row.GroundingQuery,
++  citations: row.Citations,
++  citationRate: row.CitationRate ?? null,
++  intents: row.Intent ?? [],
++  topics: row.TopicClusters ?? [],
++});
++
++const toPage = (row: z.infer<typeof citedPageRow>): BingCitedPage => ({
++  url: row.PageUrl,
++  citations: row.Citations,
++});
++
++/**
++ * Bing's UI export uses display headings ("Grounding query", "Citation
++ * share"), not the JSON payload's field names, so columns are matched by a
++ * normalized form of the heading rather than exact text.
++ */
++const CSV_COLUMNS = {
++  query: ["groundingquery", "query"],
++  citations: ["citations"],
++  citationRate: ["citationshare", "citationrate"],
++  intent: ["intent"],
++  topic: ["topic", "topics", "topicclusters"],
++} as const;
++
++const normalizeHeading = (heading: string) =>
++  heading.toLowerCase().replace(/[^a-z]/g, "");
++
++function columnFinder(headings: string[]) {
++  const normalized = headings.map(normalizeHeading);
++  return (candidates: readonly string[]) => {
++    const index = normalized.findIndex((heading) =>
++      candidates.includes(heading),
++    );
++    return index === -1 ? null : headings[index];
++  };
++}
++
++/** Accepts "38.06%", "38.06" and "0.3806", all of which Bing has used. */
++function parseRate(value: string | undefined): number | null {
++  if (!value) return null;
++  const trimmed = value.trim();
++  if (trimmed === "") return null;
++  const numeric = Number.parseFloat(trimmed.replace(/[%\s]/g, ""));
++  if (!Number.isFinite(numeric)) return null;
++  return trimmed.includes("%") || numeric > 1 ? numeric / 100 : numeric;
++}
++
++const splitList = (value: string | undefined) =>
++  (value ?? "")
++    .split(/[;,|]/)
++    .map((part) => part.trim())
++    .filter(Boolean);
++
++function parseCsv(raw: string): BingAiPerformanceImport | null {
++  const parsed = Papa.parse<Record<string, string>>(raw.trim(), {
++    header: true,
++    skipEmptyLines: true,
++  });
++  const headings = parsed.meta.fields ?? [];
++  const find = columnFinder(headings);
++  const queryColumn = find(CSV_COLUMNS.query);
++  if (!queryColumn) return null;
++
++  const citationsColumn = find(CSV_COLUMNS.citations);
++  const rateColumn = find(CSV_COLUMNS.citationRate);
++  const intentColumn = find(CSV_COLUMNS.intent);
++  const topicColumn = find(CSV_COLUMNS.topic);
++
++  const queries = parsed.data
++    .map((row) => ({
++      query: (row[queryColumn] ?? "").trim(),
++      citations: Number.parseInt(
++        (citationsColumn ? (row[citationsColumn] ?? "0") : "0").replace(
++          /[^0-9-]/g,
++          "",
++        ),
++        10,
++      ),
++      citationRate: rateColumn ? parseRate(row[rateColumn]) : null,
++      intents: intentColumn ? splitList(row[intentColumn]) : [],
++      topics: topicColumn ? splitList(row[topicColumn]) : [],
++    }))
++    .filter((row) => row.query !== "")
++    .map((row) => ({
++      ...row,
++      citations: Number.isFinite(row.citations) ? row.citations : 0,
++    }));
++
++  return queries.length === 0
++    ? null
++    : { siteUrl: null, queries, pages: [], reportedQueryTotal: null };
++}
++
++/**
++ * Returns the parsed export, or a message naming what was wrong. Pasting the
++ * wrong thing is the normal failure here, so it is an expected result rather
++ * than a thrown error.
++ */
++export function parseBingAiPerformance(
++  raw: string,
++): { ok: true; value: BingAiPerformanceImport } | { ok: false; error: string } {
++  let json: unknown;
++  try {
++    json = JSON.parse(raw);
++  } catch {
++    const csv = parseCsv(raw);
++    return csv
++      ? { ok: true, value: csv }
++      : {
++          ok: false,
++          error:
++            "Could not read that as Bing JSON or as a CSV export with a grounding-query column.",
++        };
++  }
++
++  const queriesOnly = queriesResponse.safeParse(json);
++  if (queriesOnly.success) {
++    return {
++      ok: true,
++      value: {
++        siteUrl: queriesOnly.data.SiteUrl ?? null,
++        queries: queriesOnly.data.Queries.map(toQuery),
++        pages: [],
++        reportedQueryTotal: queriesOnly.data.TotalNumOfRecords ?? null,
++      },
++    };
++  }
++
++  const pagesOnly = pagesResponse.safeParse(json);
++  if (pagesOnly.success) {
++    return {
++      ok: true,
++      value: {
++        siteUrl: pagesOnly.data.SiteUrl ?? null,
++        queries: [],
++        pages: pagesOnly.data.Pages.map(toPage),
++        reportedQueryTotal: null,
++      },
++    };
++  }
++
++  const combined = combinedExport.safeParse(json);
++  if (combined.success && (combined.data.queries ?? combined.data.pages)) {
++    return {
++      ok: true,
++      value: {
++        siteUrl: combined.data.site ?? null,
++        queries: (combined.data.queries ?? []).map(toQuery),
++        pages: (combined.data.pages ?? []).map(toPage),
++        reportedQueryTotal: null,
++      },
++    };
++  }
++
++  return {
++    ok: false,
++    error:
++      "No Bing AI Performance rows found. Paste the response from the grounding-queries or pages endpoint, or the combined export.",
++  };
++}
+-- 
+2.43.0
+

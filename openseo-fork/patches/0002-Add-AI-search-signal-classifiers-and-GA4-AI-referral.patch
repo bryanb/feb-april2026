@@ -1,7 +1,7 @@
 From adc23777356cb2cec281f810c41f100191dc6027 Mon Sep 17 00:00:00 2001
 From: Bryan B <bbigari@gmail.com>
 Date: Fri, 23 Oct 2026 01:59:38 +0000
-Subject: [PATCH 2/4] Add AI search signal classifiers and GA4 AI referral
+Subject: [PATCH 2/5] Add AI search signal classifiers and GA4 AI referral
  service
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

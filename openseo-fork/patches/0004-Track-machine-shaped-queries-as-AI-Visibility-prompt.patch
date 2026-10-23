@@ -1,7 +1,7 @@
 From 7e1972372ac031a3e7eaf9c8b8937213b081f11c Mon Sep 17 00:00:00 2001
 From: Bryan B <bbigari@gmail.com>
 Date: Fri, 23 Oct 2026 12:25:13 +0000
-Subject: [PATCH 4/4] Track machine-shaped queries as AI Visibility prompts
+Subject: [PATCH 4/5] Track machine-shaped queries as AI Visibility prompts
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

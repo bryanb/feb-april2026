@@ -1,0 +1,12 @@
+{
+  "name": "bing-ai-export",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "login": "node export.mjs --login",
+    "export": "node export.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

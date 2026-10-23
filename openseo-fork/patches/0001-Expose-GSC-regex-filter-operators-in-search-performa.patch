@@ -1,7 +1,7 @@
 From 63e0aa103a7c0d8e99ea72173805ae105d9b6703 Mon Sep 17 00:00:00 2001
 From: Bryan B <bbigari@gmail.com>
 Date: Fri, 23 Oct 2026 01:52:55 +0000
-Subject: [PATCH 1/4] Expose GSC regex filter operators in search performance
+Subject: [PATCH 1/5] Expose GSC regex filter operators in search performance
 
 Google's Search Analytics API supports includingRegex and excludingRegex
 (RE2), but the app only surfaced equals/notEquals/contains/notContains.
