@@ -1,0 +1,1178 @@
+From a36d8d251e183a25e2f67f9cb74a00c6dda9c893 Mon Sep 17 00:00:00 2001
+From: Bryan B <bbigari@gmail.com>
+Date: Fri, 23 Oct 2026 02:15:48 +0000
+Subject: [PATCH 3/3] Add AI Search Signals page
+
+One page for "where do we show up in AI search", with the two kinds of
+evidence kept visibly apart rather than blended into a single number.
+
+The GA4 half is measured: Analytics recorded the referring host. It still
+undercounts, because assistants that strip the referrer land in Direct, and
+the card says so rather than implying a total. Filtering happens at Google on
+a source regex so a large property does not need paging to surface a handful
+of assistant rows.
+
+The Search Console half is inferred: Google exposes no AI search type and no
+AI searchAppearance, so the page matches query syntax people rarely type and
+labels rows "Likely machine" or "Possible", never "AI". The regex used is
+printed under the table so the inference is auditable, and the row links
+through to Search Performance with the same filter applied.
+
+Additive except for two nav registrations and the generated route tree, to
+keep the next upstream merge small.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JTBKYzux1gqV8tvd3Q9XBN
+---
+ .../ai-search-signals/AiReferralsSection.tsx  | 163 ++++++++++++++++
+ .../ai-search-signals/AiSearchSignalsPage.tsx | 138 ++++++++++++++
+ .../MachineQueriesSection.tsx                 | 167 +++++++++++++++++
+ .../aiSearchSignalsQueries.ts                 |  34 ++++
+ src/client/navigation/items.ts                |   7 +
+ src/routeTree.gen.ts                          |  22 +++
+ .../_app/p/$projectId/ai-search-signals.tsx   |  33 ++++
+ .../ga4/services/Ga4AiReferralService.test.ts |  14 +-
+ .../ga4/services/Ga4AiReferralService.ts      |  35 ++--
+ src/serverFunctions/aiSearchSignals.ts        | 174 ++++++++++++++++++
+ src/shared/ai-query-signals.ts                |  29 ++-
+ src/shared/ai-referrers.ts                    |  12 +-
+ src/types/schemas/ai-search-signals.ts        |  34 ++++
+ 13 files changed, 832 insertions(+), 30 deletions(-)
+ create mode 100644 src/client/features/ai-search-signals/AiReferralsSection.tsx
+ create mode 100644 src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
+ create mode 100644 src/client/features/ai-search-signals/MachineQueriesSection.tsx
+ create mode 100644 src/client/features/ai-search-signals/aiSearchSignalsQueries.ts
+ create mode 100644 src/routes/_app/p/$projectId/ai-search-signals.tsx
+ create mode 100644 src/serverFunctions/aiSearchSignals.ts
+ create mode 100644 src/types/schemas/ai-search-signals.ts
+
+diff --git a/src/client/features/ai-search-signals/AiReferralsSection.tsx b/src/client/features/ai-search-signals/AiReferralsSection.tsx
+new file mode 100644
+index 00000000..5303d12b
+--- /dev/null
++++ b/src/client/features/ai-search-signals/AiReferralsSection.tsx
+@@ -0,0 +1,163 @@
++import { AI_ENGINE_LABELS } from "@/shared/ai-visibility";
++import {
++  AI_REFERRER_ENGINE_LABELS,
++  type AiReferrerEngine,
++} from "@/shared/ai-referrers";
++import {
++  Card,
++  CardContent,
++  CardDescription,
++  CardHeader,
++  CardTitle,
++} from "@/client/components/ui/card";
++import {
++  Table,
++  TableBody,
++  TableCell,
++  TableHead,
++  TableHeader,
++  TableRow,
++} from "@/client/components/ui/table";
++
++const ENGINE_LABELS: Record<AiReferrerEngine, string> = {
++  ...AI_ENGINE_LABELS,
++  ...AI_REFERRER_ENGINE_LABELS,
++};
++
++const integer = new Intl.NumberFormat();
++const percent = new Intl.NumberFormat(undefined, {
++  style: "percent",
++  maximumFractionDigits: 1,
++});
++
++type EngineRow = {
++  engine: AiReferrerEngine;
++  sessions: number;
++  activeUsers: number;
++  engagedSessions: number;
++  keyEvents: number;
++  engagementRate: number | null;
++};
++
++type LandingPageRow = Record<string, string | number | null>;
++
++export function AiReferralsSection({
++  byEngine,
++  landingPages,
++  totalSessions,
++  previousSessions,
++}: {
++  byEngine: EngineRow[];
++  landingPages: LandingPageRow[];
++  totalSessions: number;
++  previousSessions: number;
++}) {
++  const change =
++    previousSessions === 0
++      ? null
++      : (totalSessions - previousSessions) / previousSessions;
++  return (
++    <Card>
++      <CardHeader>
++        <CardTitle>Measured: visits from AI assistants</CardTitle>
++        <CardDescription>
++          Sessions Google Analytics recorded as arriving from an AI assistant.
++          These undercount: assistants that open links without passing a
++          referrer — the ChatGPT apps among them — are counted as Direct and
++          cannot be separated out.
++        </CardDescription>
++      </CardHeader>
++      <CardContent className="space-y-4">
++        <div className="flex flex-wrap gap-6">
++          <div>
++            <div className="text-2xl font-semibold">
++              {integer.format(totalSessions)}
++            </div>
++            <div className="text-sm text-muted-foreground">
++              sessions from AI assistants
++            </div>
++          </div>
++          <div>
++            <div className="text-2xl font-semibold">
++              {change === null ? "—" : percent.format(change)}
++            </div>
++            <div className="text-sm text-muted-foreground">
++              vs previous period
++            </div>
++          </div>
++        </div>
++
++        {byEngine.length === 0 ? (
++          <p className="text-sm text-muted-foreground">
++            No assistant referrals in this period. That is a real zero for
++            referred traffic, but not proof of zero AI visibility — see the
++            Search Console section below.
++          </p>
++        ) : (
++          <Table>
++            <TableHeader>
++              <TableRow>
++                <TableHead>Assistant</TableHead>
++                <TableHead className="text-right">Sessions</TableHead>
++                <TableHead className="text-right">Users</TableHead>
++                <TableHead className="text-right">Engagement</TableHead>
++                <TableHead className="text-right">Key events</TableHead>
++              </TableRow>
++            </TableHeader>
++            <TableBody>
++              {byEngine.map((row) => (
++                <TableRow key={row.engine}>
++                  <TableCell className="font-medium">
++                    {ENGINE_LABELS[row.engine]}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.sessions)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.activeUsers)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {row.engagementRate === null
++                      ? "—"
++                      : percent.format(row.engagementRate)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.keyEvents)}
++                  </TableCell>
++                </TableRow>
++              ))}
++            </TableBody>
++          </Table>
++        )}
++
++        {landingPages.length > 0 ? (
++          <div className="space-y-2">
++            <h3 className="text-sm font-semibold">
++              Pages assistants send people to
++            </h3>
++            <Table>
++              <TableHeader>
++                <TableRow>
++                  <TableHead>Landing page</TableHead>
++                  <TableHead className="text-right">Sessions</TableHead>
++                </TableRow>
++              </TableHeader>
++              <TableBody>
++                {landingPages.slice(0, 20).map((row, index) => (
++                  <TableRow key={`${row.landingPage}-${index}`}>
++                    <TableCell className="font-mono text-xs">
++                      {String(row.landingPage ?? "")}
++                    </TableCell>
++                    <TableCell className="text-right">
++                      {integer.format(Number(row.sessions ?? 0))}
++                    </TableCell>
++                  </TableRow>
++                ))}
++              </TableBody>
++            </Table>
++          </div>
++        ) : null}
++      </CardContent>
++    </Card>
++  );
++}
+diff --git a/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx b/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
+new file mode 100644
+index 00000000..7cd13939
+--- /dev/null
++++ b/src/client/features/ai-search-signals/AiSearchSignalsPage.tsx
+@@ -0,0 +1,138 @@
++import { useQuery } from "@tanstack/react-query";
++import { QueryError } from "@/client/components/QueryState";
++import { Spinner } from "@/client/components/ui/spinner";
++import {
++  Select,
++  SelectContent,
++  SelectItem,
++  SelectTrigger,
++  SelectValue,
++} from "@/client/components/ui/select";
++import { GoogleConnectionCard } from "@/client/features/integrations/GoogleConnectionCard";
++import { AiReferralsSection } from "./AiReferralsSection";
++import { MachineQueriesSection } from "./MachineQueriesSection";
++import {
++  aiQuerySignalsQueryOptions,
++  aiReferralsQueryOptions,
++} from "./aiSearchSignalsQueries";
++import type {
++  AiSignalsDateRange,
++  aiSearchSignalsSearchSchema,
++} from "@/types/schemas/ai-search-signals";
++import type { z } from "zod";
++
++type Search = z.infer<typeof aiSearchSignalsSearchSchema>;
++
++const RANGE_ITEMS = [
++  { value: "last_7_days", label: "Last 7 days" },
++  { value: "last_28_days", label: "Last 28 days" },
++  { value: "last_3_months", label: "Last 3 months" },
++] as const;
++
++const isRange = (value: string | null): value is AiSignalsDateRange =>
++  RANGE_ITEMS.some((item) => item.value === value);
++
++export function AiSearchSignalsPage({
++  projectId,
++  search,
++  onSearchChange,
++}: {
++  projectId: string;
++  search: Search;
++  onSearchChange: (update: Partial<Search>) => void;
++}) {
++  const range = search.range ?? "last_28_days";
++  const preset = search.preset ?? "any";
++
++  const referralsQuery = useQuery(aiReferralsQueryOptions(projectId, range));
++  const signalsQuery = useQuery(
++    aiQuerySignalsQueryOptions(projectId, range, preset),
++  );
++
++  const referrals = referralsQuery.data;
++  const signals = signalsQuery.data;
++
++  return (
++    <div className="overflow-auto px-4 py-4 pb-24 md:px-6 md:py-6 md:pb-8">
++      <div className="mx-auto max-w-7xl space-y-4">
++        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
++          <div>
++            <h1 className="text-2xl font-semibold">AI Search Signals</h1>
++            <p className="text-sm text-muted-foreground">
++              Where this site shows up in AI-driven search — what Analytics
++              measured, and what Search Console suggests.
++            </p>
++          </div>
++          <Select
++            items={RANGE_ITEMS}
++            value={range}
++            onValueChange={(value) =>
++              onSearchChange({ range: isRange(value) ? value : undefined })
++            }
++          >
++            <SelectTrigger
++              size="sm"
++              className="w-full sm:w-44 sm:shrink-0"
++              aria-label="Date range"
++            >
++              <SelectValue />
++            </SelectTrigger>
++            <SelectContent>
++              {RANGE_ITEMS.map((item) => (
++                <SelectItem key={item.value} value={item.value}>
++                  {item.label}
++                </SelectItem>
++              ))}
++            </SelectContent>
++          </Select>
++        </div>
++
++        {referralsQuery.isPending ? (
++          <Spinner />
++        ) : referralsQuery.isError ? (
++          <QueryError
++            title="Could not load AI referrals"
++            fallback="Google Analytics did not return the report."
++            error={referralsQuery.error}
++            onRetry={() => void referralsQuery.refetch()}
++          />
++        ) : !referrals?.connected ? (
++          <div className="max-w-2xl">
++            <GoogleConnectionCard provider="ga4" projectId={projectId} />
++          </div>
++        ) : referrals.report ? (
++          <AiReferralsSection
++            byEngine={referrals.report.byEngine}
++            landingPages={referrals.report.landingPages}
++            totalSessions={referrals.report.totals.sessions}
++            previousSessions={referrals.report.totals.previousSessions}
++          />
++        ) : null}
++
++        {signalsQuery.isPending ? (
++          <Spinner />
++        ) : signalsQuery.isError ? (
++          <QueryError
++            title="Could not load Search Console queries"
++            fallback="Search Console did not return the report."
++            error={signalsQuery.error}
++            onRetry={() => void signalsQuery.refetch()}
++          />
++        ) : !signals?.connected ? (
++          <div className="max-w-2xl">
++            <GoogleConnectionCard provider="gsc" projectId={projectId} />
++          </div>
++        ) : (
++          <MachineQueriesSection
++            projectId={projectId}
++            queries={signals.queries}
++            expression={signals.expression}
++            matchedImpressions={signals.totals.matchedImpressions}
++            allImpressions={signals.totals.allImpressions}
++            truncated={signals.truncated}
++          />
++        )}
++      </div>
++    </div>
++  );
++}
+diff --git a/src/client/features/ai-search-signals/MachineQueriesSection.tsx b/src/client/features/ai-search-signals/MachineQueriesSection.tsx
+new file mode 100644
+index 00000000..0f74cee0
+--- /dev/null
++++ b/src/client/features/ai-search-signals/MachineQueriesSection.tsx
+@@ -0,0 +1,167 @@
++import { Link } from "@tanstack/react-router";
++import {
++  AI_QUERY_SIGNALS,
++  type AiQueryClassification,
++} from "@/shared/ai-query-signals";
++import { Badge } from "@/client/components/ui/badge";
++import {
++  Card,
++  CardContent,
++  CardDescription,
++  CardHeader,
++  CardTitle,
++} from "@/client/components/ui/card";
++import {
++  Table,
++  TableBody,
++  TableCell,
++  TableHead,
++  TableHeader,
++  TableRow,
++} from "@/client/components/ui/table";
++
++const integer = new Intl.NumberFormat();
++const percent = new Intl.NumberFormat(undefined, {
++  style: "percent",
++  maximumFractionDigits: 1,
++});
++
++const signalLabel = (id: string) =>
++  AI_QUERY_SIGNALS.find((signal) => signal.id === id)?.label ?? id;
++
++type QueryRow = AiQueryClassification & {
++  query: string;
++  clicks: number;
++  impressions: number;
++  position: number | null;
++};
++
++export function MachineQueriesSection({
++  projectId,
++  queries,
++  expression,
++  matchedImpressions,
++  allImpressions,
++  truncated,
++}: {
++  projectId: string;
++  queries: QueryRow[];
++  expression: string;
++  matchedImpressions: number;
++  allImpressions: number;
++  truncated: boolean;
++}) {
++  const share =
++    allImpressions === 0 ? null : matchedImpressions / allImpressions;
++  return (
++    <Card>
++      <CardHeader>
++        <CardTitle>Inferred: machine-shaped Search Console queries</CardTitle>
++        <CardDescription>
++          Google does not label AI traffic, so these are queries whose text
++          carries syntax people rarely type: exact-match quotes, markdown, and
++          search operators. Treat the counts as a lower bound on assistant
++          activity, not a measurement of it.
++        </CardDescription>
++      </CardHeader>
++      <CardContent className="space-y-4">
++        <div className="flex flex-wrap gap-6">
++          <div>
++            <div className="text-2xl font-semibold">
++              {integer.format(matchedImpressions)}
++            </div>
++            <div className="text-sm text-muted-foreground">
++              impressions on matching queries
++            </div>
++          </div>
++          <div>
++            <div className="text-2xl font-semibold">
++              {share === null ? "—" : percent.format(share)}
++            </div>
++            <div className="text-sm text-muted-foreground">
++              of all impressions
++            </div>
++          </div>
++          <div>
++            <div className="text-2xl font-semibold">
++              {integer.format(queries.length)}
++              {truncated ? "+" : ""}
++            </div>
++            <div className="text-sm text-muted-foreground">
++              distinct queries
++            </div>
++          </div>
++        </div>
++
++        {queries.length === 0 ? (
++          <p className="text-sm text-muted-foreground">
++            No queries matched these patterns in this period.
++          </p>
++        ) : (
++          <Table>
++            <TableHeader>
++              <TableRow>
++                <TableHead>Query</TableHead>
++                <TableHead>Signals</TableHead>
++                <TableHead className="text-right">Clicks</TableHead>
++                <TableHead className="text-right">Impressions</TableHead>
++                <TableHead className="text-right">Position</TableHead>
++                <TableHead className="text-right">Words</TableHead>
++              </TableRow>
++            </TableHeader>
++            <TableBody>
++              {queries.slice(0, 100).map((row) => (
++                <TableRow key={row.query}>
++                  <TableCell className="max-w-md break-words font-mono text-xs">
++                    {row.query}
++                  </TableCell>
++                  <TableCell className="space-x-1">
++                    {row.signalIds.map((id) => (
++                      <Badge
++                        key={id}
++                        variant={
++                          row.verdict === "likely_machine"
++                            ? "secondary"
++                            : "outline"
++                        }
++                      >
++                        {signalLabel(id)}
++                      </Badge>
++                    ))}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.clicks)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {integer.format(row.impressions)}
++                  </TableCell>
++                  <TableCell className="text-right">
++                    {row.position === null ? "—" : row.position.toFixed(1)}
++                  </TableCell>
++                  <TableCell className="text-right text-muted-foreground">
++                    {row.wordCount}
++                  </TableCell>
++                </TableRow>
++              ))}
++            </TableBody>
++          </Table>
++        )}
++
++        <div className="space-y-1 text-xs text-muted-foreground">
++          <p>
++            Pattern used:{" "}
++            <code className="break-all font-mono">{expression}</code>
++          </p>
++          <Link
++            to="/p/$projectId/search-performance"
++            params={{ projectId }}
++            search={{ queryText: expression, queryMatch: "includingRegex" }}
++            className="font-medium underline-offset-4 hover:text-foreground hover:underline"
++          >
++            Open these queries in Search Performance
++          </Link>
++        </div>
++      </CardContent>
++    </Card>
++  );
++}
+diff --git a/src/client/features/ai-search-signals/aiSearchSignalsQueries.ts b/src/client/features/ai-search-signals/aiSearchSignalsQueries.ts
+new file mode 100644
+index 00000000..6024f983
+--- /dev/null
++++ b/src/client/features/ai-search-signals/aiSearchSignalsQueries.ts
+@@ -0,0 +1,34 @@
++import { queryOptions } from "@tanstack/react-query";
++import {
++  getAiQuerySignalsReport,
++  getAiReferralReport,
++} from "@/serverFunctions/aiSearchSignals";
++import type {
++  AiSignalsDateRange,
++  aiSignalsPresetSchema,
++} from "@/types/schemas/ai-search-signals";
++import type { z } from "zod";
++
++type PresetId = z.infer<typeof aiSignalsPresetSchema>;
++
++export function aiReferralsQueryOptions(
++  projectId: string,
++  dateRange: AiSignalsDateRange,
++) {
++  return queryOptions({
++    queryKey: ["aiReferrals", projectId, dateRange],
++    queryFn: () => getAiReferralReport({ data: { projectId, dateRange } }),
++  });
++}
++
++export function aiQuerySignalsQueryOptions(
++  projectId: string,
++  dateRange: AiSignalsDateRange,
++  preset: PresetId,
++) {
++  return queryOptions({
++    queryKey: ["aiQuerySignals", projectId, dateRange, preset],
++    queryFn: () =>
++      getAiQuerySignalsReport({ data: { projectId, dateRange, preset } }),
++  });
++}
+diff --git a/src/client/navigation/items.ts b/src/client/navigation/items.ts
+index d86bccdf..e8edd114 100644
+--- a/src/client/navigation/items.ts
++++ b/src/client/navigation/items.ts
+@@ -9,6 +9,7 @@ import {
+   LayoutDashboard,
+   Link2,
+   MessageSquare,
++  Radar,
+   Search,
+   TrendingUp,
+ } from "lucide-react";
+@@ -75,6 +76,11 @@ const projectNavItems = [
+     label: "Prompt Explorer",
+     icon: MessageSquare,
+   },
++  {
++    to: "/p/$projectId/ai-search-signals" as const,
++    label: "AI Search Signals",
++    icon: Radar,
++  },
+   {
+     to: "/p/$projectId/reports" as const,
+     label: "Reports",
+@@ -138,6 +144,7 @@ export function getProjectNavGroups(projectId: string) {
+         byPath("/p/$projectId/ai-visibility/research"),
+         byPath("/p/$projectId/prompt-explorer"),
+         byPath("/p/$projectId/ai-visibility"),
++        byPath("/p/$projectId/ai-search-signals"),
+       ],
+     },
+     {
+diff --git a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+index d8262d28..092c61aa 100644
+--- a/src/routeTree.gen.ts
++++ b/src/routeTree.gen.ts
+@@ -44,6 +44,7 @@ import { Route as STokenIndexRouteImport } from './routes/s/$token/index'
+ import { Route as STokenOgDotpngRouteImport } from './routes/s/$token/og[.]png'
+ import { Route as STokenRawRouteImport } from './routes/s/$token/raw'
+ import { Route as AppPProjectIdIndexRouteImport } from './routes/_app/p/$projectId/index'
++import { Route as AppPProjectIdAiSearchSignalsRouteImport } from './routes/_app/p/$projectId/ai-search-signals'
+ import { Route as AppPProjectIdAiVisibilityRouteImport } from './routes/_app/p/$projectId/ai-visibility'
+ import { Route as AppPProjectIdBacklinksRouteImport } from './routes/_app/p/$projectId/backlinks'
+ import { Route as AppPProjectIdBrandLookupRouteImport } from './routes/_app/p/$projectId/brand-lookup'
+@@ -247,6 +248,12 @@ const AppPProjectIdIndexRoute = AppPProjectIdIndexRouteImport.update({
+   path: '/',
+   getParentRoute: () => AppPProjectIdRouteRoute,
+ } as any)
++const AppPProjectIdAiSearchSignalsRoute =
++  AppPProjectIdAiSearchSignalsRouteImport.update({
++    id: '/ai-search-signals',
++    path: '/ai-search-signals',
++    getParentRoute: () => AppPProjectIdRouteRoute,
++  } as any)
+ const AppPProjectIdAiVisibilityRoute =
+   AppPProjectIdAiVisibilityRouteImport.update({
+     id: '/ai-visibility',
+@@ -432,6 +439,7 @@ export interface FileRoutesByFullPath {
+   '/settings/': typeof AppSettingsIndexRoute
+   '/onboarding/': typeof AuthenticatedOnboardingIndexRoute
+   '/s/$token/': typeof STokenIndexRoute
++  '/p/$projectId/ai-search-signals': typeof AppPProjectIdAiSearchSignalsRoute
+   '/p/$projectId/ai-visibility': typeof AppPProjectIdAiVisibilityRouteWithChildren
+   '/p/$projectId/backlinks': typeof AppPProjectIdBacklinksRoute
+   '/p/$projectId/brand-lookup': typeof AppPProjectIdBrandLookupRoute
+@@ -491,6 +499,7 @@ export interface FileRoutesByTo {
+   '/settings': typeof AppSettingsIndexRoute
+   '/onboarding': typeof AuthenticatedOnboardingIndexRoute
+   '/s/$token': typeof STokenIndexRoute
++  '/p/$projectId/ai-search-signals': typeof AppPProjectIdAiSearchSignalsRoute
+   '/p/$projectId/backlinks': typeof AppPProjectIdBacklinksRoute
+   '/p/$projectId/brand-lookup': typeof AppPProjectIdBrandLookupRoute
+   '/p/$projectId/context': typeof AppPProjectIdContextRoute
+@@ -553,6 +562,7 @@ export interface FileRoutesById {
+   '/_app/settings/': typeof AppSettingsIndexRoute
+   '/_authenticated/onboarding/': typeof AuthenticatedOnboardingIndexRoute
+   '/s/$token/': typeof STokenIndexRoute
++  '/_app/p/$projectId/ai-search-signals': typeof AppPProjectIdAiSearchSignalsRoute
+   '/_app/p/$projectId/ai-visibility': typeof AppPProjectIdAiVisibilityRouteWithChildren
+   '/_app/p/$projectId/backlinks': typeof AppPProjectIdBacklinksRoute
+   '/_app/p/$projectId/brand-lookup': typeof AppPProjectIdBrandLookupRoute
+@@ -616,6 +626,7 @@ export interface FileRouteTypes {
+     | '/settings/'
+     | '/onboarding/'
+     | '/s/$token/'
++    | '/p/$projectId/ai-search-signals'
+     | '/p/$projectId/ai-visibility'
+     | '/p/$projectId/backlinks'
+     | '/p/$projectId/brand-lookup'
+@@ -675,6 +686,7 @@ export interface FileRouteTypes {
+     | '/settings'
+     | '/onboarding'
+     | '/s/$token'
++    | '/p/$projectId/ai-search-signals'
+     | '/p/$projectId/backlinks'
+     | '/p/$projectId/brand-lookup'
+     | '/p/$projectId/context'
+@@ -736,6 +748,7 @@ export interface FileRouteTypes {
+     | '/_app/settings/'
+     | '/_authenticated/onboarding/'
+     | '/s/$token/'
++    | '/_app/p/$projectId/ai-search-signals'
+     | '/_app/p/$projectId/ai-visibility'
+     | '/_app/p/$projectId/backlinks'
+     | '/_app/p/$projectId/brand-lookup'
+@@ -1034,6 +1047,13 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof AppPProjectIdIndexRouteImport
+       parentRoute: typeof AppPProjectIdRouteRoute
+     }
++    '/_app/p/$projectId/ai-search-signals': {
++      id: '/_app/p/$projectId/ai-search-signals'
++      path: '/ai-search-signals'
++      fullPath: '/p/$projectId/ai-search-signals'
++      preLoaderRoute: typeof AppPProjectIdAiSearchSignalsRouteImport
++      parentRoute: typeof AppPProjectIdRouteRoute
++    }
+     '/_app/p/$projectId/ai-visibility': {
+       id: '/_app/p/$projectId/ai-visibility'
+       path: '/ai-visibility'
+@@ -1296,6 +1316,7 @@ const AppPProjectIdSettingsRouteWithChildren =
+   )
+ 
+ interface AppPProjectIdRouteRouteChildren {
++  AppPProjectIdAiSearchSignalsRoute: typeof AppPProjectIdAiSearchSignalsRoute
+   AppPProjectIdAiVisibilityRoute: typeof AppPProjectIdAiVisibilityRouteWithChildren
+   AppPProjectIdBacklinksRoute: typeof AppPProjectIdBacklinksRoute
+   AppPProjectIdBrandLookupRoute: typeof AppPProjectIdBrandLookupRoute
+@@ -1317,6 +1338,7 @@ interface AppPProjectIdRouteRouteChildren {
+ }
+ 
+ const AppPProjectIdRouteRouteChildren: AppPProjectIdRouteRouteChildren = {
++  AppPProjectIdAiSearchSignalsRoute: AppPProjectIdAiSearchSignalsRoute,
+   AppPProjectIdAiVisibilityRoute: AppPProjectIdAiVisibilityRouteWithChildren,
+   AppPProjectIdBacklinksRoute: AppPProjectIdBacklinksRoute,
+   AppPProjectIdBrandLookupRoute: AppPProjectIdBrandLookupRoute,
+diff --git a/src/routes/_app/p/$projectId/ai-search-signals.tsx b/src/routes/_app/p/$projectId/ai-search-signals.tsx
+new file mode 100644
+index 00000000..0e7dd442
+--- /dev/null
++++ b/src/routes/_app/p/$projectId/ai-search-signals.tsx
+@@ -0,0 +1,33 @@
++import {
++  createFileRoute,
++  stripSearchParams,
++  useNavigate,
++} from "@tanstack/react-router";
++import { AiSearchSignalsPage } from "@/client/features/ai-search-signals/AiSearchSignalsPage";
++import { aiSearchSignalsSearchSchema } from "@/types/schemas/ai-search-signals";
++
++export const Route = createFileRoute("/_app/p/$projectId/ai-search-signals")({
++  validateSearch: aiSearchSignalsSearchSchema,
++  search: {
++    middlewares: [stripSearchParams({ range: "last_28_days", preset: "any" })],
++  },
++  component: AiSearchSignalsRoute,
++});
++
++function AiSearchSignalsRoute() {
++  const { projectId } = Route.useParams();
++  const navigate = useNavigate({ from: Route.fullPath });
++  const search = Route.useSearch();
++  return (
++    <AiSearchSignalsPage
++      projectId={projectId}
++      search={search}
++      onSearchChange={(update) => {
++        void navigate({
++          search: (prev) => ({ ...prev, ...update }),
++          replace: true,
++        });
++      }}
++    />
++  );
++}
+diff --git a/src/server/features/ga4/services/Ga4AiReferralService.test.ts b/src/server/features/ga4/services/Ga4AiReferralService.test.ts
+index 09b7be1b..4a217053 100644
+--- a/src/server/features/ga4/services/Ga4AiReferralService.test.ts
++++ b/src/server/features/ga4/services/Ga4AiReferralService.test.ts
+@@ -1,10 +1,12 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest";
++import type { Ga4RunReportRequest } from "@/server/lib/ga4Client";
+ import { makeGa4Connection } from "./ga4-test-fixtures";
+ import { Ga4AiReferralService } from "./Ga4AiReferralService";
+ 
+ const mocks = vi.hoisted(() => ({
+   getByProjectId: vi.fn(),
+-  runReport: vi.fn(),
++  // Typed so the request assertion below reads real fields, not `any`.
++  runReport: vi.fn<(request: Ga4RunReportRequest) => Promise<unknown>>(),
+ }));
+ 
+ vi.mock("@/server/features/ga4/repositories/Ga4ConnectionRepository", () => ({
+@@ -84,10 +86,12 @@ describe("Ga4AiReferralService", () => {
+     // thousands of rows before finding the few that matter.
+     await Ga4AiReferralService.getAiReferrals({ projectId: "p1" });
+ 
+-    const [request] = mocks.runReport.mock.calls[0] ?? [];
+-    expect(request.dimensionFilter.filter).toMatchObject({
+-      fieldName: "sessionSource",
+-      stringFilter: { matchType: "PARTIAL_REGEXP", caseSensitive: false },
++    const request = mocks.runReport.mock.calls[0]?.[0];
++    expect(request?.dimensionFilter).toMatchObject({
++      filter: {
++        fieldName: "sessionSource",
++        stringFilter: { matchType: "PARTIAL_REGEXP", caseSensitive: false },
++      },
+     });
+   });
+ });
+diff --git a/src/server/features/ga4/services/Ga4AiReferralService.ts b/src/server/features/ga4/services/Ga4AiReferralService.ts
+index f55f3004..2f60d72c 100644
+--- a/src/server/features/ga4/services/Ga4AiReferralService.ts
++++ b/src/server/features/ga4/services/Ga4AiReferralService.ts
+@@ -44,6 +44,9 @@ type Ga4AiReferralInput = {
+ 
+ type Ga4Row = Record<string, string | number | null>;
+ 
++/** A source row once its host has been resolved to an assistant. */
++type AnnotatedSourceRow = Ga4Row & { engine: AiReferrerEngine | null };
++
+ function aiSourceFilter() {
+   return {
+     filter: {
+@@ -89,13 +92,18 @@ const numeric = (row: Ga4Row, key: string) =>
+  * Rolls per-source rows up to one row per assistant. Engagement rate is a
+  * ratio, so it is recomputed from engaged sessions rather than summed.
+  */
+-function rollUpByEngine(rows: Ga4Row[]) {
++function rollUpByEngine(rows: AnnotatedSourceRow[]) {
+   const totals = new Map<
+     AiReferrerEngine,
+-    { sessions: number; activeUsers: number; engagedSessions: number; keyEvents: number }
++    {
++      sessions: number;
++      activeUsers: number;
++      engagedSessions: number;
++      keyEvents: number;
++    }
+   >();
+   for (const row of rows) {
+-    const engine = row.engine as AiReferrerEngine | null;
++    const { engine } = row;
+     if (!engine) continue;
+     const current = totals.get(engine) ?? {
+       sessions: 0,
+@@ -106,21 +114,22 @@ function rollUpByEngine(rows: Ga4Row[]) {
+     totals.set(engine, {
+       sessions: current.sessions + numeric(row, "sessions"),
+       activeUsers: current.activeUsers + numeric(row, "activeUsers"),
+-      engagedSessions: current.engagedSessions + numeric(row, "engagedSessions"),
++      engagedSessions:
++        current.engagedSessions + numeric(row, "engagedSessions"),
+       keyEvents: current.keyEvents + numeric(row, "keyEvents"),
+     });
+   }
+-  return [...totals.entries()]
+-    .map(([engine, value]) => ({
+-      engine,
+-      ...value,
+-      engagementRate:
+-        value.sessions === 0 ? null : value.engagedSessions / value.sessions,
+-    }))
+-    .sort((a, b) => b.sessions - a.sessions);
++  const rolled = [...totals.entries()].map(([engine, value]) => ({
++    engine,
++    ...value,
++    engagementRate:
++      value.sessions === 0 ? null : value.engagedSessions / value.sessions,
++  }));
++  rolled.sort((a, b) => b.sessions - a.sessions);
++  return rolled;
+ }
+ 
+-function annotateSources(rows: Ga4Row[]) {
++function annotateSources(rows: Ga4Row[]): AnnotatedSourceRow[] {
+   return rows.map((row) => ({
+     ...row,
+     engine: classifyReferrerSource(String(row.sessionSource ?? "")),
+diff --git a/src/serverFunctions/aiSearchSignals.ts b/src/serverFunctions/aiSearchSignals.ts
+new file mode 100644
+index 00000000..2fa020c4
+--- /dev/null
++++ b/src/serverFunctions/aiSearchSignals.ts
+@@ -0,0 +1,174 @@
++import { createServerFn } from "@tanstack/react-start";
++import { Ga4AiReferralService } from "@/server/features/ga4/services/Ga4AiReferralService";
++import { Ga4ReportError } from "@/server/lib/ga4Errors";
++import {
++  GscNotConnectedError,
++  GscService,
++  isExpectedGrantFailure,
++} from "@/server/features/gsc/services/GscService";
++import { resolveDateRange } from "@/server/features/gsc/searchAnalytics";
++import { previousPeriod } from "@/server/features/gsc/searchPerformanceReport";
++import { requireProjectContext } from "@/serverFunctions/middleware";
++import { AI_QUERY_PRESETS, classifyQuery } from "@/shared/ai-query-signals";
++import {
++  aiReferralsInputSchema,
++  aiSearchSignalsInputSchema,
++} from "@/types/schemas/ai-search-signals";
++
++/** dimensions:["date"] returns one row per day; the longest range is ~92 days. */
++const DAILY_ROW_LIMIT = 200;
++/**
++ * Matching queries are a small fraction of a property's rows and Google
++ * filters them server-side, so this ceiling is about keeping one response
++ * readable rather than about the property's size.
++ */
++const MATCHED_QUERY_LIMIT = 500;
++
++/** Not connected, or a dead/denied grant: the page renders the connect card.
++ *  Other statuses (429, 5xx) are real faults. */
++function isExpectedConnectionFailure(error: unknown): boolean {
++  return error instanceof GscNotConnectedError || isExpectedGrantFailure(error);
++}
++
++const sumMetric = (
++  rows: { clicks?: number; impressions?: number }[],
++  key: "clicks" | "impressions",
++) => rows.reduce((total, row) => total + (row[key] ?? 0), 0);
++
++/**
++ * Search Console queries whose text looks machine-issued, with the share of
++ * impressions and clicks they account for.
++ *
++ * Google labels none of this. The regex runs at Google so only matching rows
++ * come back, and the same patterns re-run locally to say which fingerprint
++ * each row tripped. Every number here is a lower bound on assistant activity,
++ * never a measurement of it.
++ */
++export const getAiQuerySignalsReport = createServerFn({ method: "POST" })
++  .middleware(requireProjectContext)
++  .validator(aiSearchSignalsInputSchema)
++  .handler(async ({ data, context }) => {
++    const { startDate, endDate } = resolveDateRange({
++      dateRange: data.dateRange,
++    });
++    const prev = previousPeriod(startDate, endDate);
++    const projectId = context.projectId;
++    const expression = AI_QUERY_PRESETS[data.preset];
++    const matchFilter = [
++      {
++        dimension: "query" as const,
++        operator: "includingRegex" as const,
++        expression,
++      },
++    ];
++
++    try {
++      const [allDays, matchedDays, matchedPrevDays, matchedQueries] =
++        await Promise.all([
++          GscService.getPerformance({
++            projectId,
++            startDate,
++            endDate,
++            dimensions: ["date"],
++            rowLimit: DAILY_ROW_LIMIT,
++          }),
++          GscService.getPerformance({
++            projectId,
++            startDate,
++            endDate,
++            dimensions: ["date"],
++            filters: matchFilter,
++            rowLimit: DAILY_ROW_LIMIT,
++          }),
++          GscService.getPerformance({
++            projectId,
++            startDate: prev.startDate,
++            endDate: prev.endDate,
++            dimensions: ["date"],
++            filters: matchFilter,
++            rowLimit: DAILY_ROW_LIMIT,
++          }),
++          GscService.getPerformance({
++            projectId,
++            startDate,
++            endDate,
++            dimensions: ["query"],
++            filters: matchFilter,
++            rowLimit: MATCHED_QUERY_LIMIT,
++          }),
++        ]);
++
++      const queries = matchedQueries.rows.map((row) => {
++        const query = String(row.keys?.[0] ?? "");
++        return {
++          query,
++          clicks: row.clicks ?? 0,
++          impressions: row.impressions ?? 0,
++          position: row.position ?? null,
++          ...classifyQuery(query),
++        };
++      });
++
++      return {
++        connected: true as const,
++        range: { startDate, endDate },
++        preset: data.preset,
++        /** Shown in the UI so the inference is auditable, not a black box. */
++        expression,
++        totals: {
++          matchedClicks: sumMetric(matchedDays.rows, "clicks"),
++          matchedImpressions: sumMetric(matchedDays.rows, "impressions"),
++          allClicks: sumMetric(allDays.rows, "clicks"),
++          allImpressions: sumMetric(allDays.rows, "impressions"),
++          previousMatchedImpressions: sumMetric(
++            matchedPrevDays.rows,
++            "impressions",
++          ),
++        },
++        trend: matchedDays.rows.map((row) => ({
++          date: String(row.keys?.[0] ?? ""),
++          clicks: row.clicks ?? 0,
++          impressions: row.impressions ?? 0,
++        })),
++        queries,
++        truncated: queries.length >= MATCHED_QUERY_LIMIT,
++      };
++    } catch (error) {
++      if (isExpectedConnectionFailure(error)) {
++        return { connected: false as const };
++      }
++      throw error;
++    }
++  });
++
++/**
++ * Sessions GA4 recorded as arriving from an AI assistant. Measured, unlike the
++ * query report above — though it undercounts, because assistants that strip
++ * the referrer are indistinguishable from Direct.
++ */
++export const getAiReferralReport = createServerFn({ method: "POST" })
++  .middleware(requireProjectContext)
++  .validator(aiReferralsInputSchema)
++  .handler(async ({ data, context }) => {
++    const { startDate, endDate } = resolveDateRange({
++      dateRange: data.dateRange,
++    });
++    try {
++      const report = await Ga4AiReferralService.getAiReferrals({
++        projectId: context.projectId,
++        startDate,
++        endDate,
++      });
++      return { connected: true as const, report };
++    } catch (error) {
++      if (
++        error instanceof Ga4ReportError &&
++        (error.code === "ga4_not_connected" ||
++          error.code === "ga4_reconnect_required" ||
++          error.code === "ga4_property_inaccessible")
++      ) {
++        return { connected: false as const };
++      }
++      throw error;
++    }
++  });
+diff --git a/src/shared/ai-query-signals.ts b/src/shared/ai-query-signals.ts
+index 7cdb526a..c1fcf7b2 100644
+--- a/src/shared/ai-query-signals.ts
++++ b/src/shared/ai-query-signals.ts
+@@ -22,11 +22,11 @@
+  */
+ 
+ /** How much weight to give a match when describing it to a user. */
+-export type AiQuerySignalTier = "likely_machine" | "possible";
++type AiQuerySignalTier = "likely_machine" | "possible";
+ 
+-export type AiQueryVerdict = AiQuerySignalTier | "none";
++type AiQueryVerdict = AiQuerySignalTier | "none";
+ 
+-export interface AiQuerySignal {
++interface AiQuerySignal {
+   id: string;
+   /** Short column/badge label. */
+   label: string;
+@@ -42,7 +42,7 @@ export const AI_QUERY_SIGNALS: readonly AiQuerySignal[] = [
+     id: "quoted",
+     label: "Quoted",
+     description:
+-      'Wrapped in quotation marks for an exact-match search. Assistants quote a phrase to pin it down; people rarely type quotes.',
++      "Wrapped in quotation marks for an exact-match search. Assistants quote a phrase to pin it down; people rarely type quotes.",
+     pattern: '["“”„]',
+     tier: "likely_machine",
+   },
+@@ -129,7 +129,7 @@ export function classifyQuery(query: string): AiQueryClassification {
+   };
+ }
+ 
+-export function countWords(query: string): number {
++function countWords(query: string): number {
+   const trimmed = query.trim();
+   return trimmed === "" ? 0 : trimmed.split(/\s+/).length;
+ }
+@@ -138,7 +138,17 @@ export function countWords(query: string): number {
+  * Ready-to-send RE2 expressions for the Search Console `includingRegex`
+  * filter, so Google does the matching and only machine-shaped rows come back.
+  */
+-export const AI_QUERY_PRESETS = {
++export const AI_QUERY_PRESET_IDS = [
++  "any",
++  "quoted",
++  "markdown",
++  "operators",
++  "fragments",
++] as const;
++
++type AiQueryPresetId = (typeof AI_QUERY_PRESET_IDS)[number];
++
++export const AI_QUERY_PRESETS: Record<AiQueryPresetId, string> = {
+   any: buildPreset(AI_QUERY_SIGNALS.map((signal) => signal.id)),
+   quoted: buildPreset(["quoted"]),
+   markdown: buildPreset([
+@@ -150,8 +160,6 @@ export const AI_QUERY_PRESETS = {
+   fragments: buildPreset(["conversational-fragment"]),
+ } as const;
+ 
+-export type AiQueryPresetId = keyof typeof AI_QUERY_PRESETS;
+-
+ function buildPreset(signalIds: readonly string[]): string {
+   return AI_QUERY_SIGNALS.filter((signal) => signalIds.includes(signal.id))
+     .map((signal) => `(${signal.pattern})`)
+@@ -168,7 +176,10 @@ export function normalizeMachineQuery(query: string): string {
+     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+     .replace(/[*`]+/g, "")
+     .replace(/["“”„]/g, "")
+-    .replace(/(^| )-?(site|intitle|inurl|filetype|allintitle|allinurl):\S*/gi, " ")
++    .replace(
++      /(^| )-?(site|intitle|inurl|filetype|allintitle|allinurl):\S*/gi,
++      " ",
++    )
+     .replace(/^(#+|[-*+])\s+/, "")
+     .replace(/\s+/g, " ")
+     .trim();
+diff --git a/src/shared/ai-referrers.ts b/src/shared/ai-referrers.ts
+index f2f85169..716eb107 100644
+--- a/src/shared/ai-referrers.ts
++++ b/src/shared/ai-referrers.ts
+@@ -38,12 +38,18 @@ interface AiReferrerRule {
+  * Order matters only for readability; hosts are distinct, so at most one rule
+  * matches a given source.
+  */
+-export const AI_REFERRER_RULES: readonly AiReferrerRule[] = [
+-  { engine: "chatgpt", hosts: ["chatgpt.com", "chat.openai.com", "openai.com"] },
++const AI_REFERRER_RULES: readonly AiReferrerRule[] = [
++  {
++    engine: "chatgpt",
++    hosts: ["chatgpt.com", "chat.openai.com", "openai.com"],
++  },
+   { engine: "perplexity", hosts: ["perplexity.ai"] },
+   { engine: "claude", hosts: ["claude.ai", "anthropic.com"] },
+   { engine: "gemini", hosts: ["gemini.google.com", "bard.google.com"] },
+-  { engine: "copilot", hosts: ["copilot.microsoft.com", "m365.cloud.microsoft"] },
++  {
++    engine: "copilot",
++    hosts: ["copilot.microsoft.com", "m365.cloud.microsoft"],
++  },
+   {
+     engine: "other_ai",
+     hosts: [
+diff --git a/src/types/schemas/ai-search-signals.ts b/src/types/schemas/ai-search-signals.ts
+new file mode 100644
+index 00000000..b3529121
+--- /dev/null
++++ b/src/types/schemas/ai-search-signals.ts
+@@ -0,0 +1,34 @@
++import { z } from "zod";
++import { AI_QUERY_PRESET_IDS } from "@/shared/ai-query-signals";
++
++/**
++ * Ranges for the AI Search Signals page. Matches the Search Performance page's
++ * subset so the two read the same; assignability to GscDateRange is
++ * compiler-checked at the resolveDateRange call site.
++ */
++export const AI_SIGNALS_RANGES = [
++  "last_7_days",
++  "last_28_days",
++  "last_3_months",
++] as const;
++
++export type AiSignalsDateRange = (typeof AI_SIGNALS_RANGES)[number];
++
++export const aiSignalsPresetSchema = z.enum(AI_QUERY_PRESET_IDS);
++
++export const aiSearchSignalsInputSchema = z.object({
++  projectId: z.string().min(1),
++  dateRange: z.enum(AI_SIGNALS_RANGES).default("last_28_days"),
++  preset: aiSignalsPresetSchema.default("any"),
++});
++
++export const aiReferralsInputSchema = z.object({
++  projectId: z.string().min(1),
++  dateRange: z.enum(AI_SIGNALS_RANGES).default("last_28_days"),
++});
++
++/** /p/$projectId/ai-search-signals query params. */
++export const aiSearchSignalsSearchSchema = z.object({
++  range: z.enum(AI_SIGNALS_RANGES).optional().catch(undefined),
++  preset: aiSignalsPresetSchema.optional().catch(undefined),
++});
+-- 
+2.43.0
+

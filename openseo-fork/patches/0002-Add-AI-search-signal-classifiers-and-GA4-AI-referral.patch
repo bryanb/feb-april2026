@@ -1,0 +1,795 @@
+From adc23777356cb2cec281f810c41f100191dc6027 Mon Sep 17 00:00:00 2001
+From: Bryan B <bbigari@gmail.com>
+Date: Fri, 23 Oct 2026 01:59:38 +0000
+Subject: [PATCH 2/3] Add AI search signal classifiers and GA4 AI referral
+ service
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two halves of the same question — where an agency shows up in AI-driven
+search — kept deliberately separate because their evidence differs.
+
+ai-referrers.ts is measurement: GA4 records the referring host, so a session
+attributed to ChatGPT really came from ChatGPT. It still undercounts, because
+assistants that strip the referrer land in Direct, so the service reports that
+limit alongside the numbers rather than leaving callers to assume a total.
+
+ai-query-signals.ts is inference: Google exposes no AI search type and no AI
+searchAppearance, so the only signal is query text. It scores syntax a person
+would not type (exact-match quotes, markdown, operators) rather than length,
+because assistant queries are frequently short — AI Mode logs conversational
+follow-ups as fresh searches — and length would both miss those and flag
+ordinary long-tail.
+
+Patterns are sent to Google as RE2 and run locally as JS RegExp, so they stay
+in the subset both accept; a test enforces that.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JTBKYzux1gqV8tvd3Q9XBN
+---
+ .../ga4/services/Ga4AiReferralService.test.ts |  93 +++++++
+ .../ga4/services/Ga4AiReferralService.ts      | 253 ++++++++++++++++++
+ src/shared/ai-query-signals.test.ts           |  68 +++++
+ src/shared/ai-query-signals.ts                | 175 ++++++++++++
+ src/shared/ai-referrers.test.ts               |  37 +++
+ src/shared/ai-referrers.ts                    |  86 ++++++
+ 6 files changed, 712 insertions(+)
+ create mode 100644 src/server/features/ga4/services/Ga4AiReferralService.test.ts
+ create mode 100644 src/server/features/ga4/services/Ga4AiReferralService.ts
+ create mode 100644 src/shared/ai-query-signals.test.ts
+ create mode 100644 src/shared/ai-query-signals.ts
+ create mode 100644 src/shared/ai-referrers.test.ts
+ create mode 100644 src/shared/ai-referrers.ts
+
+diff --git a/src/server/features/ga4/services/Ga4AiReferralService.test.ts b/src/server/features/ga4/services/Ga4AiReferralService.test.ts
+new file mode 100644
+index 00000000..09b7be1b
+--- /dev/null
++++ b/src/server/features/ga4/services/Ga4AiReferralService.test.ts
+@@ -0,0 +1,93 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { makeGa4Connection } from "./ga4-test-fixtures";
++import { Ga4AiReferralService } from "./Ga4AiReferralService";
++
++const mocks = vi.hoisted(() => ({
++  getByProjectId: vi.fn(),
++  runReport: vi.fn(),
++}));
++
++vi.mock("@/server/features/ga4/repositories/Ga4ConnectionRepository", () => ({
++  Ga4ConnectionRepository: { getByProjectId: mocks.getByProjectId },
++}));
++
++vi.mock("@/server/lib/ga4Client", () => ({
++  createGa4DataClient: () => ({ runReport: mocks.runReport }),
++}));
++
++const metricHeaders = [
++  "sessions",
++  "activeUsers",
++  "engagedSessions",
++  "engagementRate",
++  "keyEvents",
++].map((name) => ({ name }));
++
++/** Two ChatGPT hosts plus one Perplexity, so the rollup has something to fold. */
++const sourceRows = [
++  ["chatgpt.com", "referral", "60", "50", "30", "0.5", "3"],
++  ["chat.openai.com", "referral", "20", "18", "10", "0.5", "1"],
++  ["perplexity.ai", "referral", "20", "20", "20", "1", "2"],
++].map((values) => ({
++  dimensionValues: values.slice(0, 2).map((value) => ({ value })),
++  metricValues: values.slice(2).map((value) => ({ value })),
++}));
++
++/**
++ * The normalizer requires headers to match the request's dimensions exactly,
++ * and only exempts a response that carries no headers at all.
++ */
++const emptyReport = { rows: [], rowCount: 0 };
++
++describe("Ga4AiReferralService", () => {
++  beforeEach(() => {
++    mocks.getByProjectId.mockResolvedValue(makeGa4Connection());
++    mocks.runReport.mockResolvedValue(emptyReport);
++  });
++
++  it("folds hosts of the same assistant into one engine row", async () => {
++    // ChatGPT reaches GA4 under more than one host. Reporting them apart
++    // would understate the assistant that matters most to the user.
++    mocks.runReport.mockResolvedValueOnce({
++      dimensionHeaders: [{ name: "sessionSource" }, { name: "sessionMedium" }],
++      metricHeaders,
++      rows: sourceRows,
++      rowCount: 3,
++    });
++
++    const result = await Ga4AiReferralService.getAiReferrals({
++      projectId: "p1",
++    });
++
++    expect(result?.byEngine).toEqual([
++      {
++        engine: "chatgpt",
++        sessions: 80,
++        activeUsers: 68,
++        engagedSessions: 40,
++        keyEvents: 4,
++        engagementRate: 0.5,
++      },
++      {
++        engine: "perplexity",
++        sessions: 20,
++        activeUsers: 20,
++        engagedSessions: 20,
++        keyEvents: 2,
++        engagementRate: 1,
++      },
++    ]);
++  });
++
++  it("filters at Google on the assistant source list", async () => {
++    // Fetching every source and filtering locally would page through
++    // thousands of rows before finding the few that matter.
++    await Ga4AiReferralService.getAiReferrals({ projectId: "p1" });
++
++    const [request] = mocks.runReport.mock.calls[0] ?? [];
++    expect(request.dimensionFilter.filter).toMatchObject({
++      fieldName: "sessionSource",
++      stringFilter: { matchType: "PARTIAL_REGEXP", caseSensitive: false },
++    });
++  });
++});
+diff --git a/src/server/features/ga4/services/Ga4AiReferralService.ts b/src/server/features/ga4/services/Ga4AiReferralService.ts
+new file mode 100644
+index 00000000..f55f3004
+--- /dev/null
++++ b/src/server/features/ga4/services/Ga4AiReferralService.ts
+@@ -0,0 +1,253 @@
++/**
++ * Sessions that arrived from an AI assistant, read from GA4.
++ *
++ * This is the measured half of AI search visibility: GA4 recorded the
++ * referring host, so these sessions really did come from the assistant named.
++ * The inferred half lives in the Search Console query fingerprints
++ * (`src/shared/ai-query-signals.ts`).
++ *
++ * The figures are a floor, not a total. Assistants that open links without a
++ * referrer — the ChatGPT apps among them — are indistinguishable from Direct,
++ * so every surface showing these numbers must say they undercount.
++ *
++ * Filtering happens at Google rather than over fetched rows: a property with
++ * thousands of sources would otherwise need paging before the handful of
++ * assistant rows could be found.
++ */
++
++import { Ga4ConnectionRepository } from "@/server/features/ga4/repositories/Ga4ConnectionRepository";
++import { createGa4DataClient } from "@/server/lib/ga4Client";
++import type { Ga4RunReportRequest } from "@/server/lib/ga4Client";
++import { Ga4ReportError } from "@/server/lib/ga4Errors";
++import {
++  AI_REFERRER_SOURCE_REGEX,
++  classifyReferrerSource,
++  type AiReferrerEngine,
++} from "@/shared/ai-referrers";
++import { normalizeGa4Response } from "./Ga4ReportNormalization";
++import { previousPeriod } from "./Ga4ReportEnhancements";
++import { mapGa4ReportError, resolveGa4DateRange } from "./Ga4ReportingService";
++
++const REFERRAL_METRICS = [
++  "sessions",
++  "activeUsers",
++  "engagedSessions",
++  "engagementRate",
++  "keyEvents",
++] as const;
++
++type Ga4AiReferralInput = {
++  projectId: string;
++  startDate?: string;
++  endDate?: string;
++};
++
++type Ga4Row = Record<string, string | number | null>;
++
++function aiSourceFilter() {
++  return {
++    filter: {
++      fieldName: "sessionSource",
++      stringFilter: {
++        matchType: "PARTIAL_REGEXP",
++        value: AI_REFERRER_SOURCE_REGEX,
++        caseSensitive: false,
++      },
++    },
++  };
++}
++
++function buildReferralRequest(input: {
++  startDate: string;
++  endDate: string;
++  dimensions: readonly string[];
++  orderMetric?: string;
++  limit?: number;
++}): Ga4RunReportRequest {
++  const [firstDimension] = input.dimensions;
++  return {
++    dateRanges: [{ startDate: input.startDate, endDate: input.endDate }],
++    dimensions: input.dimensions.map((name) => ({ name })),
++    metrics: REFERRAL_METRICS.map((name) => ({ name })),
++    dimensionFilter: aiSourceFilter(),
++    offset: "0",
++    limit: String(input.limit ?? 1000),
++    orderBys: input.orderMetric
++      ? [{ metric: { metricName: input.orderMetric }, desc: true }]
++      : firstDimension
++        ? [{ dimension: { dimensionName: firstDimension } }]
++        : [],
++    keepEmptyRows: false,
++    returnPropertyQuota: true,
++  };
++}
++
++const numeric = (row: Ga4Row, key: string) =>
++  typeof row[key] === "number" ? row[key] : 0;
++
++/**
++ * Rolls per-source rows up to one row per assistant. Engagement rate is a
++ * ratio, so it is recomputed from engaged sessions rather than summed.
++ */
++function rollUpByEngine(rows: Ga4Row[]) {
++  const totals = new Map<
++    AiReferrerEngine,
++    { sessions: number; activeUsers: number; engagedSessions: number; keyEvents: number }
++  >();
++  for (const row of rows) {
++    const engine = row.engine as AiReferrerEngine | null;
++    if (!engine) continue;
++    const current = totals.get(engine) ?? {
++      sessions: 0,
++      activeUsers: 0,
++      engagedSessions: 0,
++      keyEvents: 0,
++    };
++    totals.set(engine, {
++      sessions: current.sessions + numeric(row, "sessions"),
++      activeUsers: current.activeUsers + numeric(row, "activeUsers"),
++      engagedSessions: current.engagedSessions + numeric(row, "engagedSessions"),
++      keyEvents: current.keyEvents + numeric(row, "keyEvents"),
++    });
++  }
++  return [...totals.entries()]
++    .map(([engine, value]) => ({
++      engine,
++      ...value,
++      engagementRate:
++        value.sessions === 0 ? null : value.engagedSessions / value.sessions,
++    }))
++    .sort((a, b) => b.sessions - a.sessions);
++}
++
++function annotateSources(rows: Ga4Row[]) {
++  return rows.map((row) => ({
++    ...row,
++    engine: classifyReferrerSource(String(row.sessionSource ?? "")),
++  }));
++}
++
++function sumSessions(rows: Ga4Row[]) {
++  return rows.reduce((total, row) => total + numeric(row, "sessions"), 0);
++}
++
++async function getAiReferrals(
++  input: Ga4AiReferralInput,
++  opts: { now?: Date } = {},
++) {
++  const connection = await Ga4ConnectionRepository.getByProjectId(
++    input.projectId,
++  );
++  if (!connection) {
++    throw new Ga4ReportError(
++      "ga4_not_connected",
++      "Google Analytics is not connected for this project.",
++    );
++  }
++  const dateRange = resolveGa4DateRange(
++    input,
++    connection.propertyTimeZone,
++    opts.now,
++  );
++  const resolved = dateRange.resolvedDateRange;
++  const previousDateRange = previousPeriod(resolved);
++
++  const sourceRequest = buildReferralRequest({
++    ...resolved,
++    dimensions: ["sessionSource", "sessionMedium"],
++    orderMetric: "sessions",
++  });
++  const previousRequest = buildReferralRequest({
++    ...previousDateRange,
++    dimensions: ["sessionSource", "sessionMedium"],
++    orderMetric: "sessions",
++  });
++  const trendRequest = buildReferralRequest({
++    ...resolved,
++    dimensions: ["date"],
++  });
++  const landingPageRequest = buildReferralRequest({
++    ...resolved,
++    dimensions: ["hostName", "landingPage"],
++    orderMetric: "sessions",
++    limit: 250,
++  });
++
++  const client = createGa4DataClient({
++    userId: connection.connectedByUserId,
++    ga4AccountId: connection.ga4AccountId,
++    propertyId: connection.propertyId,
++  });
++
++  try {
++    const [sourceResponse, previousResponse, trendResponse, landingResponse] =
++      await Promise.all([
++        client.runReport(sourceRequest),
++        client.runReport(previousRequest),
++        client.runReport(trendRequest),
++        client.runReport(landingPageRequest),
++      ]);
++    const sources = normalizeGa4Response(sourceResponse, sourceRequest);
++    const previous = normalizeGa4Response(previousResponse, previousRequest);
++    const trend = normalizeGa4Response(trendResponse, trendRequest);
++    const landingPages = normalizeGa4Response(
++      landingResponse,
++      landingPageRequest,
++    );
++    const reports = [sources, previous, trend, landingPages];
++    const bySource = annotateSources(sources.rows);
++    const currentSessions = sumSessions(sources.rows);
++    const previousSessions = sumSessions(previous.rows);
++    return {
++      status: "ok" as const,
++      source: {
++        provider: "google_analytics" as const,
++        propertyId: connection.propertyId,
++        propertyDisplayName: connection.propertyDisplayName,
++      },
++      request: {
++        requestedDateRange: dateRange.requestedDateRange,
++        resolvedDateRange: resolved,
++        previousDateRange,
++        propertyTimeZone: connection.propertyTimeZone,
++      },
++      totals: {
++        sessions: currentSessions,
++        previousSessions,
++        keyEvents: sources.rows.reduce(
++          (total, row) => total + numeric(row, "keyEvents"),
++          0,
++        ),
++      },
++      byEngine: rollUpByEngine(bySource),
++      bySource,
++      landingPages: landingPages.rows,
++      trend: trend.rows,
++      /**
++       * Stated on every surface: assistants that strip the referrer are
++       * counted as Direct and cannot be recovered from this report.
++       */
++      measurement: {
++        basis: "ga4_session_source" as const,
++        undercounts: true,
++      },
++      reportMetadata: {
++        hasLimitedData: reports.some(
++          (report) => report.reportMetadata.hasLimitedData,
++        ),
++        reports: reports.map((report) => report.reportMetadata),
++      },
++      quota: sources.quota ?? trend.quota,
++      warnings: [
++        ...dateRange.warnings,
++        ...(sources.totalRowCount > sources.rows.length
++          ? ["sources_truncated"]
++          : []),
++      ],
++    };
++  } catch (error) {
++    mapGa4ReportError(error);
++  }
++}
++
++export const Ga4AiReferralService = { getAiReferrals };
+diff --git a/src/shared/ai-query-signals.test.ts b/src/shared/ai-query-signals.test.ts
+new file mode 100644
+index 00000000..bbdf7431
+--- /dev/null
++++ b/src/shared/ai-query-signals.test.ts
+@@ -0,0 +1,68 @@
++import { describe, expect, it } from "vitest";
++import {
++  AI_QUERY_PRESETS,
++  AI_QUERY_SIGNALS,
++  classifyQuery,
++  normalizeMachineQuery,
++} from "@/shared/ai-query-signals";
++
++describe("AI_QUERY_SIGNALS", () => {
++  it("compiles every pattern as a JS RegExp", () => {
++    // The same source string is sent to Google as RE2 and run locally as a
++    // JS RegExp. A pattern that only one engine accepts would make the local
++    // verdict disagree with the rows Google returned.
++    for (const signal of AI_QUERY_SIGNALS) {
++      expect(() => new RegExp(signal.pattern)).not.toThrow();
++    }
++  });
++});
++
++describe("classifyQuery", () => {
++  it.each([
++    ['"best cnc machining shop in chicago"', "quoted"],
++    ["**precision grinding** services", "markdown-emphasis"],
++    ["[swiss machining](https://example.com/swiss)", "markdown-link"],
++    ["- surface grinding tolerances", "markdown-block"],
++    ["swiss screw machining site:example.com", "search-operator"],
++    ["edm machining -hobbyist", "exclusion"],
++  ])("flags %s as likely machine-issued", (query, expectedSignal) => {
++    const result = classifyQuery(query);
++    expect(result.verdict).toBe("likely_machine");
++    expect(result.signalIds).toContain(expectedSignal);
++  });
++
++  it.each([
++    "cnc machining services milwaukee",
++    "5-axis aerospace parts manufacturer wisconsin",
++    "what is the tightest tolerance for surface grinding",
++    "iso 9001 certified precision machine shop near me",
++  ])("leaves ordinary search %s unflagged", (query) => {
++    // These are the queries the agency actually ranks for. A false positive
++    // here would quietly inflate every number on the page, including the
++    // long conversational one — length must not drive the verdict.
++    expect(classifyQuery(query).verdict).toBe("none");
++  });
++
++  it("rates a bare conversational reply only as possible", () => {
++    // AI Mode logs follow-ups as new searches, but "yes" is also a plausible
++    // human query, so it must not count as high confidence.
++    expect(classifyQuery("yes").verdict).toBe("possible");
++  });
++});
++
++describe("AI_QUERY_PRESETS", () => {
++  it("matches the same queries Google would return for the combined preset", () => {
++    const preset = new RegExp(AI_QUERY_PRESETS.any, "i");
++    expect(preset.test('"deburring services"')).toBe(true);
++    expect(preset.test("cnc machining services milwaukee")).toBe(false);
++  });
++});
++
++describe("normalizeMachineQuery", () => {
++  it("strips machine syntax and keeps the wording", () => {
++    // The wording is the part worth tracking as an AI Visibility prompt.
++    expect(
++      normalizeMachineQuery('"best **swiss** machining shop" site:example.com'),
++    ).toBe("best swiss machining shop");
++  });
++});
+diff --git a/src/shared/ai-query-signals.ts b/src/shared/ai-query-signals.ts
+new file mode 100644
+index 00000000..7cdb526a
+--- /dev/null
++++ b/src/shared/ai-query-signals.ts
+@@ -0,0 +1,175 @@
++/**
++ * Fingerprints for Search Console queries that look machine-issued.
++ *
++ * Google does not label AI traffic: the Search Analytics API exposes no AI
++ * search type and no AI `searchAppearance`, and the Generative AI performance
++ * report is UI-only with no query detail. The only signal left is the query
++ * text itself, and the strongest one is syntax a person would not type —
++ * exact-match quotes, markdown, and search operators — which assistants emit
++ * when they search on someone's behalf.
++ *
++ * This is inference, not measurement. Every surface built on it must say so.
++ *
++ * Word count is deliberately not scored. Assistant-issued queries are often
++ * short (AI Mode turns conversational follow-ups like "yes" into fresh
++ * searches), so length both misses real cases and catches ordinary long-tail.
++ * It is exposed for display only.
++ *
++ * Every pattern here is sent to Google as RE2 *and* run locally as a JS
++ * `RegExp`, so all of them stay inside the shared subset of both: no
++ * lookaround, no backreferences, no inline flags. `ai-query-signals.test.ts`
++ * enforces that.
++ */
++
++/** How much weight to give a match when describing it to a user. */
++export type AiQuerySignalTier = "likely_machine" | "possible";
++
++export type AiQueryVerdict = AiQuerySignalTier | "none";
++
++export interface AiQuerySignal {
++  id: string;
++  /** Short column/badge label. */
++  label: string;
++  /** Why this shape suggests a machine issued the query. */
++  description: string;
++  /** Pattern source, valid in both RE2 and JS. Matched case-insensitively. */
++  pattern: string;
++  tier: AiQuerySignalTier;
++}
++
++export const AI_QUERY_SIGNALS: readonly AiQuerySignal[] = [
++  {
++    id: "quoted",
++    label: "Quoted",
++    description:
++      'Wrapped in quotation marks for an exact-match search. Assistants quote a phrase to pin it down; people rarely type quotes.',
++    pattern: '["“”„]',
++    tier: "likely_machine",
++  },
++  {
++    id: "markdown-emphasis",
++    label: "Markdown",
++    description:
++      "Contains markdown bold or code formatting, which leaks from a model's own output into the query string.",
++    pattern: "\\*\\*|`",
++    tier: "likely_machine",
++  },
++  {
++    id: "markdown-link",
++    label: "Markdown link",
++    description:
++      "Contains markdown link syntax, which only appears when generated text is pasted into a search.",
++    pattern: "\\[[^\\]]+\\]\\([^)]*\\)",
++    tier: "likely_machine",
++  },
++  {
++    id: "markdown-block",
++    label: "Markdown block",
++    description:
++      "Starts with a markdown heading or list marker — a fragment of formatted output, not something typed into a search box.",
++    pattern: "^(#+ |[-*+] )",
++    tier: "likely_machine",
++  },
++  {
++    id: "search-operator",
++    label: "Operator",
++    description:
++      "Uses a Google search operator such as site: or filetype:. Assistants use operators to scope a search; most people never do.",
++    pattern: "(^| )-?(site|intitle|inurl|filetype|allintitle|allinurl):",
++    tier: "likely_machine",
++  },
++  {
++    id: "exclusion",
++    label: "Exclusion",
++    description:
++      "Excludes a term with a leading minus, a refinement assistants add when narrowing results.",
++    pattern: "(^| )-[a-z0-9]",
++    tier: "likely_machine",
++  },
++  {
++    id: "conversational-fragment",
++    label: "Fragment",
++    description:
++      "A bare conversational reply. AI Mode treats follow-ups in a conversation as new searches, so these surface as queries.",
++    pattern:
++      "^(yes|no|ok|okay|sure|go on|continue|tell me more|more details|thanks|thank you)( |$)",
++    tier: "possible",
++  },
++] as const;
++
++const signalRegex = (signal: AiQuerySignal) => new RegExp(signal.pattern, "i");
++
++export interface AiQueryClassification {
++  /** Ids of every signal the query matched, in registry order. */
++  signalIds: string[];
++  /**
++   * `likely_machine` when any high-confidence signal matched, `possible` when
++   * only a weaker one did, `none` when the query looks human.
++   */
++  verdict: AiQueryVerdict;
++  /** Display only — never used to decide the verdict. */
++  wordCount: number;
++}
++
++export function classifyQuery(query: string): AiQueryClassification {
++  const matched = AI_QUERY_SIGNALS.filter((signal) =>
++    signalRegex(signal).test(query),
++  );
++  const verdict: AiQueryVerdict = matched.some(
++    (signal) => signal.tier === "likely_machine",
++  )
++    ? "likely_machine"
++    : matched.length > 0
++      ? "possible"
++      : "none";
++  return {
++    signalIds: matched.map((signal) => signal.id),
++    verdict,
++    wordCount: countWords(query),
++  };
++}
++
++export function countWords(query: string): number {
++  const trimmed = query.trim();
++  return trimmed === "" ? 0 : trimmed.split(/\s+/).length;
++}
++
++/**
++ * Ready-to-send RE2 expressions for the Search Console `includingRegex`
++ * filter, so Google does the matching and only machine-shaped rows come back.
++ */
++export const AI_QUERY_PRESETS = {
++  any: buildPreset(AI_QUERY_SIGNALS.map((signal) => signal.id)),
++  quoted: buildPreset(["quoted"]),
++  markdown: buildPreset([
++    "markdown-emphasis",
++    "markdown-link",
++    "markdown-block",
++  ]),
++  operators: buildPreset(["search-operator", "exclusion"]),
++  fragments: buildPreset(["conversational-fragment"]),
++} as const;
++
++export type AiQueryPresetId = keyof typeof AI_QUERY_PRESETS;
++
++function buildPreset(signalIds: readonly string[]): string {
++  return AI_QUERY_SIGNALS.filter((signal) => signalIds.includes(signal.id))
++    .map((signal) => `(${signal.pattern})`)
++    .join("|");
++}
++
++/**
++ * Strips machine syntax so a detected query can seed an AI Visibility prompt.
++ * Only formatting is removed; the wording is left exactly as issued, because
++ * that wording is the thing worth tracking.
++ */
++export function normalizeMachineQuery(query: string): string {
++  return query
++    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
++    .replace(/[*`]+/g, "")
++    .replace(/["“”„]/g, "")
++    .replace(/(^| )-?(site|intitle|inurl|filetype|allintitle|allinurl):\S*/gi, " ")
++    .replace(/^(#+|[-*+])\s+/, "")
++    .replace(/\s+/g, " ")
++    .trim();
++}
+diff --git a/src/shared/ai-referrers.test.ts b/src/shared/ai-referrers.test.ts
+new file mode 100644
+index 00000000..bad0f1c0
+--- /dev/null
++++ b/src/shared/ai-referrers.test.ts
+@@ -0,0 +1,37 @@
++import { describe, expect, it } from "vitest";
++import {
++  AI_REFERRER_SOURCE_REGEX,
++  classifyReferrerSource,
++} from "@/shared/ai-referrers";
++
++describe("classifyReferrerSource", () => {
++  it.each([
++    ["chatgpt.com", "chatgpt"],
++    ["perplexity.ai", "perplexity"],
++    ["claude.ai", "claude"],
++    ["gemini.google.com", "gemini"],
++    ["copilot.microsoft.com", "copilot"],
++    ["you.com", "other_ai"],
++  ])("maps %s to %s", (source, engine) => {
++    expect(classifyReferrerSource(source)).toBe(engine);
++  });
++
++  it.each(["google", "bing", "(direct)", "linkedin.com", "thomasnet.com"])(
++    "returns null for ordinary source %s",
++    (source) => {
++      // "google" must not be mistaken for gemini.google.com — organic search
++      // is the baseline these numbers get compared against.
++      expect(classifyReferrerSource(source)).toBeNull();
++    },
++  );
++});
++
++describe("AI_REFERRER_SOURCE_REGEX", () => {
++  it("matches the same sources GA4 would filter to", () => {
++    // GA4 applies this as RE2; the local classifier decides the engine. If
++    // they disagreed, rows would arrive that the classifier drops silently.
++    const filter = new RegExp(AI_REFERRER_SOURCE_REGEX, "i");
++    expect(filter.test("chatgpt.com")).toBe(true);
++    expect(filter.test("google")).toBe(false);
++  });
++});
+diff --git a/src/shared/ai-referrers.ts b/src/shared/ai-referrers.ts
+new file mode 100644
+index 00000000..f2f85169
+--- /dev/null
++++ b/src/shared/ai-referrers.ts
+@@ -0,0 +1,86 @@
++/**
++ * Hosts that send traffic when someone follows a link out of an AI assistant.
++ *
++ * Unlike the Search Console query fingerprints in `ai-query-signals.ts`, this
++ * is measured rather than inferred: GA4 records the referring host, so a
++ * session attributed here really did arrive from that assistant.
++ *
++ * It still undercounts. Assistants that open links without a referrer — the
++ * ChatGPT desktop and mobile apps among them — land in Direct and cannot be
++ * separated from any other direct visit. Treat the numbers as a floor, and
++ * say so wherever they are shown.
++ *
++ * Engines that AI Visibility already tracks reuse its `AiEngine` ids so both
++ * features can share labels and icons. Assistants it does not track get their
++ * own ids here.
++ */
++
++import type { AiEngine } from "@/shared/ai-visibility";
++
++/** Assistants with no AI Visibility tracker of their own. */
++export type ExtraAiReferrerEngine = "copilot" | "other_ai";
++
++export type AiReferrerEngine = AiEngine | ExtraAiReferrerEngine;
++
++export const AI_REFERRER_ENGINE_LABELS: Record<ExtraAiReferrerEngine, string> =
++  {
++    copilot: "Microsoft Copilot",
++    other_ai: "Other AI assistants",
++  };
++
++interface AiReferrerRule {
++  engine: AiReferrerEngine;
++  /** Matched against the GA4 `sessionSource` value, case-insensitively. */
++  hosts: readonly string[];
++}
++
++/**
++ * Order matters only for readability; hosts are distinct, so at most one rule
++ * matches a given source.
++ */
++export const AI_REFERRER_RULES: readonly AiReferrerRule[] = [
++  { engine: "chatgpt", hosts: ["chatgpt.com", "chat.openai.com", "openai.com"] },
++  { engine: "perplexity", hosts: ["perplexity.ai"] },
++  { engine: "claude", hosts: ["claude.ai", "anthropic.com"] },
++  { engine: "gemini", hosts: ["gemini.google.com", "bard.google.com"] },
++  { engine: "copilot", hosts: ["copilot.microsoft.com", "m365.cloud.microsoft"] },
++  {
++    engine: "other_ai",
++    hosts: [
++      "you.com",
++      "phind.com",
++      "chat.mistral.ai",
++      "meta.ai",
++      "deepseek.com",
++      "grok.com",
++      "x.ai",
++      "duck.ai",
++    ],
++  },
++] as const;
++
++const escapeHost = (host: string) => host.replace(/\./g, "\\.");
++
++/**
++ * Single RE2 alternation for the GA4 `sessionSource` dimension filter, so the
++ * property returns only assistant traffic instead of every source it has.
++ */
++export const AI_REFERRER_SOURCE_REGEX = AI_REFERRER_RULES.flatMap((rule) =>
++  rule.hosts.map(escapeHost),
++).join("|");
++
++/**
++ * Maps a GA4 `sessionSource` to an engine, or null when it is not an
++ * assistant. GA4 reports the bare host, but a source can carry a path or
++ * subdomain, so matching is by substring rather than equality.
++ */
++export function classifyReferrerSource(
++  source: string,
++): AiReferrerEngine | null {
++  const normalized = source.trim().toLowerCase();
++  if (normalized === "") return null;
++  const rule = AI_REFERRER_RULES.find((candidate) =>
++    candidate.hosts.some((host) => normalized.includes(host)),
++  );
++  return rule?.engine ?? null;
++}
+-- 
+2.43.0
+
