@@ -1,0 +1,208 @@
+From 63e0aa103a7c0d8e99ea72173805ae105d9b6703 Mon Sep 17 00:00:00 2001
+From: Bryan B <bbigari@gmail.com>
+Date: Fri, 23 Oct 2026 01:52:55 +0000
+Subject: [PATCH] Expose GSC regex filter operators in search performance
+
+Google's Search Analytics API supports includingRegex and excludingRegex
+(RE2), but the app only surfaced equals/notEquals/contains/notContains.
+Regex is the only way to isolate machine-issued queries, whose text carries
+syntax humans rarely type: exact-match quotes, markdown, search operators.
+
+Widen the operator list, the filter and search-param schemas, and the match
+dropdown. The MCP tool picks this up for free because its Zod schema derives
+from GSC_FILTER_OPERATORS.
+
+The added test asserts a regex expression reaches the request byte-for-byte;
+escaping or rewriting it would silently change what matches.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JTBKYzux1gqV8tvd3Q9XBN
+---
+ .../SearchPerformanceTextFilters.tsx          | 22 ++++++++++++----
+ .../features/gsc/searchAnalytics.test.ts      | 25 +++++++++++++++++++
+ src/server/features/gsc/searchAnalytics.ts    |  6 ++++-
+ src/serverFunctions/searchPerformance.ts      |  5 ++--
+ src/types/schemas/search-performance.ts       | 16 +++++++++---
+ 5 files changed, 63 insertions(+), 11 deletions(-)
+
+diff --git a/src/client/features/search-performance/SearchPerformanceTextFilters.tsx b/src/client/features/search-performance/SearchPerformanceTextFilters.tsx
+index 6e62d98f..884482db 100644
+--- a/src/client/features/search-performance/SearchPerformanceTextFilters.tsx
++++ b/src/client/features/search-performance/SearchPerformanceTextFilters.tsx
+@@ -16,7 +16,19 @@ import type { searchPerformanceInputSchema } from "@/types/schemas/search-perfor
+ const MATCH_ITEMS = [
+   { value: "contains", label: "Contains" },
+   { value: "equals", label: "Exactly matches" },
+-];
++  { value: "includingRegex", label: "Matches regex" },
++  { value: "excludingRegex", label: "Excludes regex" },
++] as const;
++
++type MatchOperator = (typeof MATCH_ITEMS)[number]["value"];
++
++const isMatchOperator = (value: string): value is MatchOperator =>
++  MATCH_ITEMS.some((item) => item.value === value);
++
++// The Select only ever emits one of its own item values, and null when
++// cleared; the guard keeps the narrowing honest instead of casting.
++const toMatchOperator = (value: string | null): MatchOperator =>
++  value !== null && isMatchOperator(value) ? value : "contains";
+ 
+ export type TextFilters = Pick<
+   z.infer<typeof searchPerformanceInputSchema>,
+@@ -36,10 +48,10 @@ export function SearchPerformanceTextFilters({
+ }) {
+   const [page, setPage] = useState(value.pageFilter?.expression ?? "");
+   const [query, setQuery] = useState(value.queryFilter?.expression ?? "");
+-  const [pageOperator, setPageOperator] = useState<"contains" | "equals">(
++  const [pageOperator, setPageOperator] = useState<MatchOperator>(
+     value.pageFilter?.operator ?? "contains",
+   );
+-  const [queryOperator, setQueryOperator] = useState<"contains" | "equals">(
++  const [queryOperator, setQueryOperator] = useState<MatchOperator>(
+     value.queryFilter?.operator ?? "contains",
+   );
+   const dirtyCount =
+@@ -116,7 +128,7 @@ export function SearchPerformanceTextFilters({
+               items={MATCH_ITEMS}
+               value={pageOperator}
+               onValueChange={(operator) =>
+-                setPageOperator(operator === "equals" ? "equals" : "contains")
++                setPageOperator(toMatchOperator(operator))
+               }
+             >
+               <SelectTrigger
+@@ -153,7 +165,7 @@ export function SearchPerformanceTextFilters({
+               items={MATCH_ITEMS}
+               value={queryOperator}
+               onValueChange={(operator) =>
+-                setQueryOperator(operator === "equals" ? "equals" : "contains")
++                setQueryOperator(toMatchOperator(operator))
+               }
+             >
+               <SelectTrigger
+diff --git a/src/server/features/gsc/searchAnalytics.test.ts b/src/server/features/gsc/searchAnalytics.test.ts
+index 7ca3aef1..4c602b9c 100644
+--- a/src/server/features/gsc/searchAnalytics.test.ts
++++ b/src/server/features/gsc/searchAnalytics.test.ts
+@@ -64,6 +64,31 @@ describe("resolveDateRange", () => {
+ });
+ 
+ describe("buildSearchAnalyticsRequest", () => {
++  it("passes RE2 regex operators through untouched", () => {
++    // Machine-shaped queries (quotes, markdown, search operators) are only
++    // reachable through GSC's regex operators, so the expression must survive
++    // verbatim — escaping or rewriting it would silently change the match.
++    const expression = String.raw`["\u201c\u201d]|\*\*|-site:`;
++    const request = buildSearchAnalyticsRequest(
++      {
++        projectId: "p1",
++        dimensions: ["query"],
++        filters: [
++          { dimension: "query", operator: "includingRegex", expression },
++        ],
++      },
++      TODAY,
++    );
++    expect(request.dimensionFilterGroups).toEqual([
++      {
++        groupType: "and",
++        filters: [
++          { dimension: "query", operator: "includingRegex", expression },
++        ],
++      },
++    ]);
++  });
++
+   it("wraps flat filters into a single AND dimensionFilterGroup", () => {
+     const request = buildSearchAnalyticsRequest(
+       {
+diff --git a/src/server/features/gsc/searchAnalytics.ts b/src/server/features/gsc/searchAnalytics.ts
+index 322e97bf..300cf475 100644
+--- a/src/server/features/gsc/searchAnalytics.ts
++++ b/src/server/features/gsc/searchAnalytics.ts
+@@ -14,6 +14,10 @@ export const GSC_FILTER_OPERATORS = [
+   "notEquals",
+   "contains",
+   "notContains",
++  // RE2 syntax, per the Search Analytics API. Google caps the expression at
++  // 4096 chars and rejects invalid patterns with a 400.
++  "includingRegex",
++  "excludingRegex",
+ ] as const;
+ export const GSC_SEARCH_TYPES = [
+   "web",
+@@ -43,7 +47,7 @@ export const GSC_MAX_ROW_LIMIT = 1000;
+ const GSC_DATA_LAG_DAYS = 3;
+ 
+ export type GscDimension = (typeof GSC_DIMENSIONS)[number];
+-type GscFilterOperator = (typeof GSC_FILTER_OPERATORS)[number];
++export type GscFilterOperator = (typeof GSC_FILTER_OPERATORS)[number];
+ export type GscSearchType = (typeof GSC_SEARCH_TYPES)[number];
+ export type GscDateRange = (typeof GSC_DATE_RANGES)[number];
+ 
+diff --git a/src/serverFunctions/searchPerformance.ts b/src/serverFunctions/searchPerformance.ts
+index 36dc9f74..2ca64efa 100644
+--- a/src/serverFunctions/searchPerformance.ts
++++ b/src/serverFunctions/searchPerformance.ts
+@@ -6,6 +6,7 @@ import {
+ } from "@/server/features/gsc/services/GscService";
+ import {
+   resolveDateRange,
++  type GscFilterOperator,
+   type GscPerformanceFilter,
+ } from "@/server/features/gsc/searchAnalytics";
+ import {
+@@ -36,8 +37,8 @@ const EXPORT_ROW_LIMIT = 1000;
+ function buildGscFilters(data: {
+   device?: string;
+   country?: string;
+-  pageFilter?: { operator: "contains" | "equals"; expression: string };
+-  queryFilter?: { operator: "contains" | "equals"; expression: string };
++  pageFilter?: { operator: GscFilterOperator; expression: string };
++  queryFilter?: { operator: GscFilterOperator; expression: string };
+ }): {
+   nonCountryFilters: GscPerformanceFilter[];
+   filters: GscPerformanceFilter[];
+diff --git a/src/types/schemas/search-performance.ts b/src/types/schemas/search-performance.ts
+index 8fba399f..b3452e1c 100644
+--- a/src/types/schemas/search-performance.ts
++++ b/src/types/schemas/search-performance.ts
+@@ -25,13 +25,23 @@ export type SearchPerformanceDevice = (typeof GSC_DEVICES)[number];
+ const searchPerformanceFilterShape = {
+   pageFilter: z
+     .object({
+-      operator: z.enum(["contains", "equals"]),
++      operator: z.enum([
++        "contains",
++        "equals",
++        "includingRegex",
++        "excludingRegex",
++      ]),
+       expression: z.string().trim().min(1).max(4096),
+     })
+     .optional(),
+   queryFilter: z
+     .object({
+-      operator: z.enum(["contains", "equals"]),
++      operator: z.enum([
++        "contains",
++        "equals",
++        "includingRegex",
++        "excludingRegex",
++      ]),
+       expression: z.string().trim().min(1).max(4096),
+     })
+     .optional(),
+@@ -86,7 +96,7 @@ export const SEARCH_PERFORMANCE_TABS = [
+ export type SearchPerformanceTab = (typeof SEARCH_PERFORMANCE_TABS)[number];
+ 
+ const textMatchParam = z
+-  .enum(["contains", "equals"])
++  .enum(["contains", "equals", "includingRegex", "excludingRegex"])
+   .optional()
+   .catch(undefined);
+ 
+-- 
+2.43.0
+
